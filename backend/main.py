@@ -23,6 +23,10 @@ origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "https://quant-frontend.vercel.app",
+    "https://app-quant-trading.onrender.com",
+    "https://app-quant-trading-cvpbihqnv-juniorpavens-projects.vercel.app", # URL cụ thể
+    "https://app-quant-trading-gamma.vercel.app", # URL ngắn gọn thường có
+    "https://app-quant-trading.vercel.app" # URL gốc (dự đoán)
 ]
 
 app.add_middleware(
