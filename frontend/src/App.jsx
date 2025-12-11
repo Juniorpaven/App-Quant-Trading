@@ -81,10 +81,11 @@ function App() {
 
         <div style={inputGroup}>
           <label>Tickers (comma separated):</label>
-          <input
+          <textarea
             value={ntfTickers}
             onChange={(e) => setNtfTickers(e.target.value)}
-            style={inputStyle}
+            style={{ ...inputStyle, resize: "vertical", minHeight: "60px" }}
+            rows={3}
           />
         </div>
         <div style={inputGroup}>
@@ -124,10 +125,11 @@ function App() {
 
         <div style={inputGroup}>
           <label>Portfolio Assets:</label>
-          <input
+          <textarea
             value={opsTickers}
             onChange={(e) => setOpsTickers(e.target.value)}
-            style={inputStyle}
+            style={{ ...inputStyle, resize: "vertical", minHeight: "60px" }}
+            rows={3}
           />
         </div>
         <div style={inputGroup}>
