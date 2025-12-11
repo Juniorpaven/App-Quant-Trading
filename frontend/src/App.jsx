@@ -1,102 +1,229 @@
 
 import { useState } from 'react'
-import './App.css'
+import axios from 'axios'
+
+// Lấy URL từ biến môi trường (cấu hình Vercel) hoặc mặc định localhost
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 function App() {
-  const [momentumData, setMomentumData] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
+  const [status, setStatus] = useState("");
 
-  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+  // State cho NTF
+  const [ntfTickers, setNtfTickers] = useState("BTC-USD, ETH-USD, LTC-USD");
+  const [ntfLookback, setNtfLookback] = useState(20);
+  const [ntfResult, setNtfResult] = useState(null);
+  const [loadingNTF, setLoadingNTF] = useState(false);
 
-  const handleTestBackend = async () => {
-    setLoading(true);
-    setError(null);
+  // State cho OPS
+  const [opsTickers, setOpsTickers] = useState("AAPL, MSFT, GOOGL, AMZN");
+  const [opsEta, setOpsEta] = useState(0.05);
+  const [opsResult, setOpsResult] = useState(null);
+  const [loadingOPS, setLoadingOPS] = useState(false);
+
+  // 1. Check Backend
+  const checkBackend = async () => {
     try {
-      const response = await fetch(`${API_URL}/`);
-      const data = await response.json();
-      alert(`Backend Status: ${data.status}`);
+      const res = await axios.get(`${API_URL}/`);
+      setStatus(res.data.status);
     } catch (err) {
-      setError("Failed to connect to backend: " + err.message);
-    } finally {
-      setLoading(false);
+      setStatus("Error connecting to backend");
+      console.error(err);
     }
-  }
+  };
 
-  const handleCalculateNTF = async () => {
-    setLoading(true);
-    setError(null);
+  // 2. Run NTF
+  const runNTF = async () => {
+    setLoadingNTF(true);
+    setNtfResult(null);
     try {
-      // Dummy data matching the pydantic model example
-      const payload = {
-        "prices": {
-          "BTC": [100, 101, 102, 101, 103, 105, 104, 106, 108, 107],
-          "ETH": [200, 202, 201, 203, 205, 204, 206, 208, 209, 210],
-          "LTC": [50, 51, 52, 51, 51, 52, 53, 52, 54, 55]
-        },
-        "lookback_window": 5
-      };
-
-      const response = await fetch(`${API_URL}/api/ntf/momentum`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
+      const res = await axios.post(`${API_URL}/api/run-ntf`, {
+        tickers: ntfTickers,
+        lookback: Number(ntfLookback)
       });
-
-      if (!response.ok) {
-        throw new Error('Network response was not ok');
-      }
-
-      const result = await response.json();
-      setMomentumData(result.momentum);
+      setNtfResult(res.data.data);
     } catch (err) {
-      setError("Failed to calculate momentum: " + err.message);
-    } finally {
-      setLoading(false);
+      alert("Lỗi khi chạy NTF. Kiểm tra mã Ticker.");
     }
-  }
+    setLoadingNTF(false);
+  };
+
+  // 3. Run OPS
+  const runOPS = async () => {
+    setLoadingOPS(true);
+    setOpsResult(null);
+    try {
+      const res = await axios.post(`${API_URL}/api/run-ops`, {
+        tickers: opsTickers,
+        eta: Number(opsEta)
+      });
+      setOpsResult(res.data.weights);
+    } catch (err) {
+      alert("Lỗi khi chạy OPS. Cần ít nhất 2 mã.");
+    }
+    setLoadingOPS(false);
+  };
 
   return (
-    <div className="container">
-      <h1>Quant Trading Dashboard</h1>
-      <div className="card">
-        <h2>System Status</h2>
-        <button onClick={handleTestBackend} disabled={loading}>
-          {loading ? 'Checking...' : 'Check Backend Connectivity'}
-        </button>
+    <div style={{ padding: "20px", fontFamily: "Arial, sans-serif", maxWidth: "800px", margin: "0 auto", backgroundColor: "#1e1e1e", color: "#e0e0e0", minHeight: "100vh" }}>
+      <h1 style={{ color: "#646cff", textAlign: "center" }}>Quant Trading Dashboard 2.0</h1>
+
+      {/* SECTION: SYSTEM STATUS */}
+      <div style={cardStyle}>
+        <h2>📡 System Status</h2>
+        <button onClick={checkBackend} style={btnStyle}>Check Connectivity</button>
+        {status && <p style={{ marginTop: "10px", color: "#4caf50" }}>Status: {status}</p>}
       </div>
 
-      <div className="card">
-        <h2>Network Trend Following (NTF)</h2>
-        <p>Calculate Momentum Spillover for BTC, ETH, LTC (Demo Data)</p>
-        <button onClick={handleCalculateNTF} disabled={loading}>
-          {loading ? 'Calculating...' : 'Run NTF Engine'}
+      {/* SECTION: NTF ENGINE */}
+      <div style={cardStyle}>
+        <h2>🌐 Network Trend Following (NTF)</h2>
+        <p style={{ fontSize: "0.9em", color: "#aaa" }}>Nhập mã tài sản để đo Momentum (VD: VCB.VN, HPG.VN hoặc BTC-USD)</p>
+
+        <div style={inputGroup}>
+          <label>Tickers (comma separated):</label>
+          <input
+            value={ntfTickers}
+            onChange={(e) => setNtfTickers(e.target.value)}
+            style={inputStyle}
+          />
+        </div>
+        <div style={inputGroup}>
+          <label>Lookback (days):</label>
+          <input
+            type="number"
+            value={ntfLookback}
+            onChange={(e) => setNtfLookback(e.target.value)}
+            style={inputStyle}
+          />
+        </div>
+
+        <button onClick={runNTF} style={btnStyle} disabled={loadingNTF}>
+          {loadingNTF ? "Calculating..." : "Run NTF Analysis"}
         </button>
 
-        {error && <p className="error">{error}</p>}
-
-        {momentumData && (
-          <div className="results">
-            <h3>Momentum Results:</h3>
+        {ntfResult && (
+          <div style={resultBox}>
+            <h3>Momentum Scores:</h3>
             <ul>
-              {Object.entries(momentumData).map(([asset, score]) => (
-                <li key={asset}>
-                  <strong>{asset}</strong>: {score.toFixed(4)}
-                </li>
-              ))}
+              {Object.entries(ntfResult)
+                .sort(([, a], [, b]) => b - a) // Sắp xếp từ cao xuống thấp
+                .map(([key, val]) => (
+                  <li key={key} style={{ marginBottom: "5px" }}>
+                    <strong>{key}:</strong> <span style={{ color: val > 0 ? "#4caf50" : "#f44336" }}>{val}</span>
+                  </li>
+                ))}
             </ul>
           </div>
         )}
       </div>
 
-      <div className="card">
-        <h2>Online Portfolio Selection (OPS)</h2>
-        <p><em>Check the User Manual to implement this form.</em></p>
+      {/* SECTION: OPS ENGINE */}
+      <div style={cardStyle}>
+        <h2>⚖️ Online Portfolio Selection (OPS)</h2>
+        <p style={{ fontSize: "0.9em", color: "#aaa" }}>Phân bổ tỷ trọng tối ưu bằng thuật toán Exponential Gradient.</p>
+
+        <div style={inputGroup}>
+          <label>Portfolio Assets:</label>
+          <input
+            value={opsTickers}
+            onChange={(e) => setOpsTickers(e.target.value)}
+            style={inputStyle}
+          />
+        </div>
+        <div style={inputGroup}>
+          <label>Learning Rate (Eta):</label>
+          <input
+            type="number"
+            step="0.01"
+            value={opsEta}
+            onChange={(e) => setOpsEta(e.target.value)}
+            style={inputStyle}
+          />
+          <small style={{ display: "block", marginTop: "5px", color: "#888" }}>Eta cao = Thích ứng nhanh (Aggressive). Eta thấp = Ổn định (Conservative).</small>
+        </div>
+
+        <button onClick={runOPS} style={btnStyle} disabled={loadingOPS}>
+          {loadingOPS ? "Optimizing..." : "Calculate Optimal Weights"}
+        </button>
+
+        {opsResult && (
+          <div style={resultBox}>
+            <h3>Recommended Allocation:</h3>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid #555" }}>
+                  <th style={{ textAlign: "left", padding: "5px" }}>Asset</th>
+                  <th style={{ textAlign: "right", padding: "5px" }}>Weight</th>
+                  <th style={{ textAlign: "right", padding: "5px" }}>Percent</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(opsResult)
+                  .sort(([, a], [, b]) => b - a)
+                  .map(([key, val]) => (
+                    <tr key={key} style={{ borderBottom: "1px solid #333" }}>
+                      <td style={{ padding: "5px" }}>{key}</td>
+                      <td style={{ textAlign: "right", padding: "5px" }}>{val}</td>
+                      <td style={{ textAlign: "right", padding: "5px", color: "#2196f3", fontWeight: "bold" }}>
+                        {(val * 100).toFixed(1)}%
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
+
     </div>
   )
 }
+
+// --- CSS STYLES (Inline for simplicity) ---
+const cardStyle = {
+  backgroundColor: "#2a2a2a",
+  padding: "20px",
+  borderRadius: "10px",
+  marginBottom: "20px",
+  boxShadow: "0 4px 6px rgba(0,0,0,0.3)"
+};
+
+const inputGroup = {
+  marginBottom: "15px",
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "flex-start"
+};
+
+const inputStyle = {
+  width: "100%",
+  padding: "10px",
+  marginTop: "5px",
+  borderRadius: "5px",
+  border: "1px solid #444",
+  backgroundColor: "#333",
+  color: "#fff",
+  fontSize: "16px"
+};
+
+const btnStyle = {
+  padding: "10px 20px",
+  backgroundColor: "#646cff",
+  color: "white",
+  border: "none",
+  borderRadius: "5px",
+  cursor: "pointer",
+  fontSize: "16px",
+  fontWeight: "bold",
+  transition: "background 0.3s"
+};
+
+const resultBox = {
+  marginTop: "20px",
+  padding: "15px",
+  backgroundColor: "#1a1a1a",
+  borderRadius: "5px",
+  borderLeft: "4px solid #646cff"
+};
 
 export default App

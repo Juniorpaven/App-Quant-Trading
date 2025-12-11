@@ -2,31 +2,17 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Dict, Optional
+import yfinance as yf
 import pandas as pd
 import numpy as np
-import sys
-import os
-import yfinance as yf
 from datetime import datetime, timedelta
-
-# Create a way to import local modules
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-from core_engine.ntf_engine import calculate_dynamic_network_momentum
-from core_engine.ops_engine import exponential_gradient_update, apply_group_sparsity
 
 app = FastAPI()
 
-# Configure CORS
+# Cấu hình CORS (Giữ nguyên URL Vercel của bạn)
 origins = [
     "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "https://quant-frontend.vercel.app",
-    "https://app-quant-trading.onrender.com",
-    "https://app-quant-trading-cvpbihqnv-juniorpavens-projects.vercel.app", # URL cụ thể
-    "https://app-quant-trading-gamma.vercel.app", # URL ngắn gọn thường có
-    "https://app-quant-trading.vercel.app" # URL gốc (dự đoán)
+    "https://app-quant-trading.vercel.app", # Đảm bảo đúng URL của bạn
 ]
 
 app.add_middleware(
@@ -37,190 +23,110 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- CACHING (Zero-Cost Strategy) ---
+# --- CACHING & DATA UTILS ---
 DATA_CACHE = {}
-CACHE_EXPIRY_TIME = timedelta(hours=4)
 
-def get_cached_data(tickers: List[str], period="1y"):
-    cache_key = tuple(sorted(tickers))
-    if cache_key in DATA_CACHE:
-        timestamp, data = DATA_CACHE[cache_key]
-        if datetime.now() - timestamp < CACHE_EXPIRY_TIME:
-            print(f"Adding from cache: {tickers}")
-            return data
+def get_data(tickers, period="1y"): # Lấy 1 năm để OPS học tốt hơn
+    tickers = [t.strip().upper() for t in tickers]
+    key = tuple(sorted(tickers))
     
-    print(f"Fetching fresh data for: {tickers}")
-    try:
-        # Request data
-        # auto_adjust=True means 'Close' is already adjusted. 
-        data = yf.download(tickers, period=period, auto_adjust=False)
-        print(f"Downloaded shape: {data.shape}")
+    if key in DATA_CACHE and (datetime.now() - DATA_CACHE[key][0] < timedelta(hours=4)):
+        return DATA_CACHE[key][1]
         
-        if data.empty:
-             raise Exception("yfinance returned empty data")
-
-        # Handle MultiIndex
-        # Expected: Level 0 = Price Type (Adj Close, Close), Level 1 = Ticker
-        price_data = None
+    print(f"Fetching: {tickers}")
+    data = yf.download(tickers, period=period, progress=False)['Adj Close']
+    
+    # Nếu chỉ có 1 ticker, yfinance trả về Series, cần convert sang DataFrame
+    if isinstance(data, pd.Series):
+        data = data.to_frame(name=tickers[0])
         
-        if isinstance(data.columns, pd.MultiIndex):
-            # Check for Adj Close
-            if 'Adj Close' in data.columns.get_level_values(0):
-                 price_data = data['Adj Close']
-            elif 'Close' in data.columns.get_level_values(0):
-                 price_data = data['Close']
-            else:
-                 # Fallback: take the first level 0 key?
-                 print(f"Unrecognized columns levels: {data.columns.levels}")
-                 # Try to just return data if it looks like price
-                 price_data = data
-        else:
-            # Flat columns. Check if one of them is 'Adj Close' or 'Close'
-            if 'Adj Close' in data.columns:
-                price_data = data['Adj Close']
-            elif 'Close' in data.columns:
-                price_data = data['Close']
-            else:
-                 # Ensure we have numeric data
-                 price_data = data
+    # Drop rows with NaN
+    data = data.dropna()
+    
+    DATA_CACHE[key] = (datetime.now(), data)
+    return data
 
-        # Check if price_data is Series (single ticker) -> convert to DF
-        if isinstance(price_data, pd.Series):
-             price_data = price_data.to_frame(name=tickers[0])
-             
-        # Filter for only requested tickers if extra columns exist
-        # (Rare, but good safety)
-        # Verify columns overlap with requested tickers
-        # common_tickers = list(set(price_data.columns) & set(tickers))
-        # if common_tickers:
-        #    price_data = price_data[common_tickers]
+# --- ALGORITHMS ---
+
+# 1. NTF Algorithm (Giữ nguyên logic cũ nhưng dynamic ticker)
+def calculate_ntf(data, lookback=20):
+    returns = data.pct_change().dropna()
+    if len(returns) < lookback:
+        return {"error": "Not enough data"}
+    
+    momentum = returns.iloc[-lookback:].mean() * 252
+    scores = momentum.to_dict()
+    # Làm tròn số
+    return {k: round(v, 4) for k, v in scores.items()}
+
+# 2. OPS Algorithm: Exponential Gradient (EG)
+def calculate_ops_eg(data, eta=0.05):
+    """
+    Thuật toán Exponential Gradient để tìm tỷ trọng tối ưu.
+    Input: DataFrame giá đóng cửa.
+    Output: Tỷ trọng (Weights) gợi ý cho ngày tiếp theo.
+    """
+    returns = data.pct_change().dropna().values # Chuyển sang numpy array
+    T, N = returns.shape # T: số ngày, N: số tài sản
+    
+    if T == 0: return {}
+
+    # Khởi tạo tỷ trọng đều nhau: [1/N, 1/N, ...]
+    weights = np.ones(N) / N
+    
+    # Chạy mô phỏng Online Learning qua từng ngày quá khứ
+    for t in range(T):
+        # Lợi nhuận danh mục tại t: dot product của weights và returns
+        portfolio_ret = np.dot(weights, returns[t])
         
-        # Fill NA forward then backward
-        price_data = price_data.ffill().bfill()
+        # Cập nhật weights theo công thức EG:
+        # w_new = w_old * exp(eta * return_asset / portfolio_return)
+        # Tránh chia cho 0 hoặc số quá nhỏ
+        if portfolio_ret == 0: portfolio_ret = 1e-10
+            
+        exponent = eta * returns[t] / portfolio_ret
+        weights = weights * np.exp(exponent)
         
-        print(f"Processed Price Data Shape: {price_data.shape}")
-        print(f"Processed Price Data Head: \n{price_data.head()}")
+        # Chuẩn hóa lại để tổng weights = 1 (Simplex projection)
+        weights /= np.sum(weights)
+        
+    # Gán nhãn Ticker cho kết quả cuối cùng
+    result = dict(zip(data.columns, np.round(weights, 4)))
+    return result
 
-        DATA_CACHE[cache_key] = (datetime.now(), price_data)
-        return price_data
-    except Exception as e:
-        print(f"Error fetching yfinance data: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Data Fetch Error: {str(e)}")
-
-# --- MODELS ---
-
+# --- API MODELS ---
 class NTFRequest(BaseModel):
-    prices: Dict[str, List[float]] 
-    lookback_window: int = 10
-    model_config = {
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "prices": {
-                        "BTC": [100, 101, 102, 101, 103, 105, 104, 106, 108, 107],
-                        "ETH": [200, 202, 201, 203, 205, 204, 206, 208, 209, 210]
-                    },
-                    "lookback_window": 5
-                }
-            ]
-        }
-    }
-
-class NTFTickerRequest(BaseModel):
-    tickers: List[str]
-    lookback_window: int = 20
+    tickers: str # Dạng chuỗi: "BTC-USD, ETH-USD"
+    lookback: int = 20
 
 class OPSRequest(BaseModel):
-    current_weights: List[float]
-    bi_return_vector: List[float]
-    learning_rate: float = 0.5
-    group_mapping: Optional[Dict[int, int]] = None
-    alpha: float = 0.0
-    model_config = {
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "current_weights": [0.5, 0.5],
-                    "bi_return_vector": [1.02, 0.98],
-                    "learning_rate": 0.5
-                }
-            ]
-        }
-    }
+    tickers: str
+    eta: float = 0.05 # Learning rate
+
+# --- ENDPOINTS ---
 
 @app.get("/")
 def read_root():
-    return {"status": "Quant Trading Backend is Running (Zero-Cost Mode)", "modules": ["NTF", "OPS", "YFinance"]}
+    return {"status": "Backend is running (Zero-Cost Mode)"}
 
-@app.post("/api/ntf/momentum")
-def get_ntf_momentum(request: NTFRequest):
-    """Calculates momentum using manually provided price data."""
+@app.post("/api/run-ntf")
+def run_ntf_endpoint(req: NTFRequest):
+    ticker_list = [t.strip() for t in req.tickers.split(",")]
     try:
-        df_prices = pd.DataFrame(request.prices)
-        df_returns = df_prices.pct_change().dropna()
-        if df_returns.empty:
-            raise HTTPException(status_code=400, detail="Not enough data")
-        
-        momentum = calculate_dynamic_network_momentum(df_returns, request.lookback_window)
-        results = {k: float(v) for k, v in momentum.items()}
-        return {"momentum": results, "source": "manual_input"}
+        data = get_data(ticker_list)
+        results = calculate_ntf(data, req.lookback)
+        return {"status": "success", "data": results}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/run-ntf-engine")
-def run_ntf_analysis(request: NTFTickerRequest):
-    """Fetches real data from yfinance and calculates momentum."""
-    if not request.tickers:
-        raise HTTPException(status_code=400, detail="Tickers list is empty")
-        
+@app.post("/api/run-ops")
+def run_ops_endpoint(req: OPSRequest):
+    ticker_list = [t.strip() for t in req.tickers.split(",")]
+    if len(ticker_list) < 2:
+         raise HTTPException(status_code=400, detail="OPS cần ít nhất 2 tài sản để phân bổ.")
     try:
-        # Get data
-        df_prices = get_cached_data(request.tickers)
-        
-        # Calculate Returns
-        df_returns = df_prices.pct_change().dropna()
-        
-        # Ensure enough data
-        if len(df_returns) < request.lookback_window:
-             raise HTTPException(status_code=400, detail=f"Not enough historical data for analysis. Got {len(df_returns)} rows.")
-
-        # Use the powerful Engine
-        momentum = calculate_dynamic_network_momentum(df_returns, request.lookback_window)
-        
-        results = {k: float(v) for k, v in momentum.items()}
-        
-        return {
-            "status": "success",
-            "timestamp": datetime.now().isoformat(),
-            "momentum": results, 
-            "data_source": "yfinance (cached)"
-        }
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/ops/update")
-def update_portfolio(request: OPSRequest):
-    try:
-        current_w = np.array(request.current_weights)
-        ret_vec = np.array(request.bi_return_vector)
-        if len(current_w) != len(ret_vec):
-             raise HTTPException(status_code=400, detail="Dimension mismatch")
-
-        new_w = exponential_gradient_update(
-            current_w, 
-            ret_vec, 
-            request.learning_rate,
-            group_mapping=request.group_mapping,
-            alpha=request.alpha
-        )
-        return {"new_weights": new_w.tolist()}
+        data = get_data(ticker_list)
+        weights = calculate_ops_eg(data, req.eta)
+        return {"status": "success", "weights": weights, "algo": "Exponential Gradient"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)

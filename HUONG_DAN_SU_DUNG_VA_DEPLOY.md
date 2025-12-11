@@ -120,4 +120,3 @@ Do Domain Frontend đã thay đổi (không còn là localhost), bạn cần c�
 ### Hoàn tất
 
 Giờ đây bạn có thể truy cập vào đường dẫn Frontend (Vercel) từ bất kỳ đâu trên Internet để sử dụng ứng dụng.
-
