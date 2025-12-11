@@ -92,16 +92,27 @@ def calculate_ops_eg(data, eta=0.05):
         # Cập nhật weights theo công thức EG:
         # w_new = w_old * exp(eta * return_asset / portfolio_return)
         # Tránh chia cho 0 hoặc số quá nhỏ
-        if portfolio_ret == 0: portfolio_ret = 1e-10
+        if abs(portfolio_ret) < 1e-8: 
+            portfolio_ret = 1e-8
             
         exponent = eta * returns[t] / portfolio_ret
+        
+        # FIX: Clip exponent để tránh Overflow (e^709 -> inf)
+        exponent = np.clip(exponent, -30, 30)
+        
         weights = weights * np.exp(exponent)
         
+        # FIX: Handle potential Inf/NaN in weights
+        if np.any(np.isinf(weights)) or np.any(np.isnan(weights)):
+             weights = np.ones(N) / N # Reset if math error
+             
         # Chuẩn hóa lại để tổng weights = 1 (Simplex projection)
         weights /= np.sum(weights)
         
     # Gán nhãn Ticker cho kết quả cuối cùng
-    result = dict(zip(data.columns, np.round(weights, 4)))
+    # Convert numpy types to native float for JSON serialization safety
+    final_weights = [float(w) if not np.isnan(w) else 0.0 for w in weights]
+    result = dict(zip(data.columns, [round(w, 4) for w in final_weights]))
     return result
 
 # --- API MODELS ---
