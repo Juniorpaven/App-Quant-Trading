@@ -136,7 +136,12 @@ def run_ntf_endpoint(req: NTFRequest):
     try:
         data = get_data(ticker_list)
         results = calculate_ntf(data, req.lookback)
-        return {"status": "success", "data": results}
+        
+        # Calculate missing tickers
+        processed = data.columns.tolist()
+        missing = list(set(ticker_list) - set(processed))
+        
+        return {"status": "success", "data": results, "missing": missing}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

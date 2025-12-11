@@ -12,6 +12,7 @@ function App() {
   const [ntfTickers, setNtfTickers] = useState("BTC-USD, ETH-USD, LTC-USD");
   const [ntfLookback, setNtfLookback] = useState(20);
   const [ntfResult, setNtfResult] = useState(null);
+  const [ntfMissing, setNtfMissing] = useState([]);
   const [loadingNTF, setLoadingNTF] = useState(false);
 
   // State cho OPS
@@ -41,6 +42,7 @@ function App() {
         lookback: Number(ntfLookback)
       });
       setNtfResult(res.data.data);
+      setNtfMissing(res.data.missing || []);
     } catch (err) {
       console.error(err);
       const errorMsg = err.response?.data?.detail || "Lỗi kết nối Backend/Vercel (Kiểm tra Log)";
@@ -108,6 +110,13 @@ function App() {
 
         {ntfResult && (
           <div style={resultBox}>
+            {/* Warning for missing tickers */}
+            {ntfMissing && ntfMissing.length > 0 && (
+              <div style={{ marginBottom: "15px", padding: "10px", backgroundColor: "#3a2a2a", borderLeft: "4px solid #f44336", color: "#ff8a80" }}>
+                ⚠️ <strong>Missing Data:</strong> {ntfMissing.join(", ")} (Possibly delisted or invalid)
+              </div>
+            )}
+
             <h3>Momentum Scores:</h3>
             <ul>
               {Object.entries(ntfResult)
