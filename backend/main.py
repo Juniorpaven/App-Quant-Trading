@@ -39,9 +39,19 @@ def get_data(tickers, period="1y"): # Lấy 1 năm để OPS học tốt hơn
     # Nếu chỉ có 1 ticker, yfinance trả về Series, cần convert sang DataFrame
     if isinstance(data, pd.Series):
         data = data.to_frame(name=tickers[0])
-        
-    # Drop rows with NaN
-    data = data.dropna()
+    
+    # 1. Drop Columns (Tickers) that have NO data (failed download)
+    data = data.dropna(axis=1, how='all')
+    
+    if data.empty:
+         # Nếu drop hết thì return empty distinct
+         return data
+
+    # 2. Drop Rows (Dates) that have NaN (ensure alignment for remaining tickers)
+    # Tuy nhiên, nếu dữ liệu các mã lệch nhau quá nhiều (VD: BTC chạy 24/7, Stock chạy T2-T6)
+    # Dropna sẽ làm mất hết dữ liệu BTC vào T7, CN. 
+    # Tốt nhất là forward fill trước khi dropna
+    data = data.ffill().dropna()
     
     DATA_CACHE[key] = (datetime.now(), data)
     return data
