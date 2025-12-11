@@ -34,7 +34,7 @@ def get_data(tickers, period="1y"): # Lấy 1 năm để OPS học tốt hơn
         return DATA_CACHE[key][1]
         
     print(f"Fetching: {tickers}")
-    data = yf.download(tickers, period=period, progress=False)['Adj Close']
+    data = yf.download(tickers, period=period, progress=False, auto_adjust=False)['Adj Close']
     
     # Nếu chỉ có 1 ticker, yfinance trả về Series, cần convert sang DataFrame
     if isinstance(data, pd.Series):

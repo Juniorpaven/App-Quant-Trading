@@ -42,7 +42,9 @@ function App() {
       });
       setNtfResult(res.data.data);
     } catch (err) {
-      alert("Lỗi khi chạy NTF. Kiểm tra mã Ticker.");
+      console.error(err);
+      const errorMsg = err.response?.data?.detail || "Lỗi kết nối Backend/Vercel (Kiểm tra Log)";
+      alert(`NTF Error: ${errorMsg}`);
     }
     setLoadingNTF(false);
   };
@@ -58,7 +60,9 @@ function App() {
       });
       setOpsResult(res.data.weights);
     } catch (err) {
-      alert("Lỗi khi chạy OPS. Cần ít nhất 2 mã.");
+      console.error(err);
+      const errorMsg = err.response?.data?.detail || "Lỗi kết nối Backend/Vercel (Kiểm tra Log)";
+      alert(`OPS Error: ${errorMsg}`);
     }
     setLoadingOPS(false);
   };
