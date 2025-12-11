@@ -1,6 +1,29 @@
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import axios from 'axios'
+// --- IMPORT MỚI CHO BIỂU ĐỒ ---
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+} from 'chart.js';
+import { Line } from 'react-chartjs-2';
+
+// Đăng ký các thành phần biểu đồ
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend
+);
 
 // Lấy URL từ biến môi trường (cấu hình Vercel) hoặc mặc định localhost
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -18,8 +41,14 @@ function App() {
   // State cho OPS
   const [opsTickers, setOpsTickers] = useState("AAPL, MSFT, GOOGL, AMZN");
   const [opsEta, setOpsEta] = useState(0.05);
+  // Thêm state mới OPS Max Weight
+  const [opsMaxWeight, setOpsMaxWeight] = useState(1.0);
   const [opsResult, setOpsResult] = useState(null);
   const [loadingOPS, setLoadingOPS] = useState(false);
+
+  // --- STATE MỚI CHO BACKTEST ---
+  const [backtestResult, setBacktestResult] = useState(null);
+  const [loadingBacktest, setLoadingBacktest] = useState(false);
 
   // 1. Check Backend
   const checkBackend = async () => {
@@ -69,9 +98,65 @@ function App() {
     setLoadingOPS(false);
   };
 
+  // 4. Run Backtest
+  const runBacktest = async () => {
+    setLoadingBacktest(true);
+    setBacktestResult(null);
+    try {
+      // Dùng chung input của phần OPS để Backtest
+      const res = await axios.post(`${API_URL}/api/backtest`, {
+        tickers: opsTickers,
+        eta: Number(opsEta),
+        max_weight: Number(opsMaxWeight),
+        period: "1y" // Mặc định 1 năm
+      });
+      setBacktestResult(res.data);
+    } catch (err) {
+      console.error(err);
+      const errorMsg = err.response?.data?.detail || "Lỗi Backtest! Đảm bảo Backend đã cập nhật.";
+      alert(`Backtest Error: ${errorMsg}`);
+    }
+    setLoadingBacktest(false);
+  };
+
+  // --- CẤU HÌNH BIỂU ĐỒ ---
+  const chartOptions = {
+    responsive: true,
+    plugins: {
+      legend: { position: 'top' },
+      title: { display: true, text: 'So sánh Hiệu suất Đầu tư (1 Năm qua)' },
+    },
+    scales: {
+      x: { ticks: { maxTicksLimit: 10 } } // Giới hạn số nhãn ngày cho đỡ rối
+    }
+  };
+
+  const chartData = backtestResult ? {
+    labels: backtestResult.chart_data.dates,
+    datasets: [
+      {
+        label: 'Thuật toán OPS (AI)',
+        data: backtestResult.chart_data.strategy,
+        borderColor: '#00e676', // Màu xanh lá
+        backgroundColor: 'rgba(0, 230, 118, 0.5)',
+        borderWidth: 2,
+        pointRadius: 0, // Ẩn điểm tròn cho mượt
+      },
+      {
+        label: 'Mua & Giữ (Benchmark)',
+        data: backtestResult.chart_data.benchmark,
+        borderColor: '#ff1744', // Màu đỏ
+        backgroundColor: 'rgba(255, 23, 68, 0.5)',
+        borderWidth: 2,
+        pointRadius: 0,
+        borderDash: [5, 5], // Nét đứt
+      },
+    ],
+  } : null;
+
   return (
-    <div style={{ padding: "20px", fontFamily: "Arial, sans-serif", maxWidth: "800px", margin: "0 auto", backgroundColor: "#1e1e1e", color: "#e0e0e0", minHeight: "100vh" }}>
-      <h1 style={{ color: "#646cff", textAlign: "center" }}>Quant Trading Dashboard 2.0</h1>
+    <div style={{ padding: "20px", fontFamily: "Arial, sans-serif", maxWidth: "900px", margin: "0 auto", backgroundColor: "#1e1e1e", color: "#e0e0e0", minHeight: "100vh" }}>
+      <h1 style={{ color: "#646cff", textAlign: "center" }}>Quant Trading Dashboard 3.0 (Ultimate)</h1>
 
       {/* SECTION: SYSTEM STATUS */}
       <div style={cardStyle}>
@@ -131,10 +216,10 @@ function App() {
         )}
       </div>
 
-      {/* SECTION: OPS ENGINE */}
+      {/* SECTION: OPS ENGINE & BACKTEST */}
       <div style={cardStyle}>
-        <h2>⚖️ Online Portfolio Selection (OPS)</h2>
-        <p style={{ fontSize: "0.9em", color: "#aaa" }}>Phân bổ tỷ trọng tối ưu bằng thuật toán Exponential Gradient.</p>
+        <h2>⚖️ Portfolio Optimization & Backtest</h2>
+        <p style={{ fontSize: "0.9em", color: "#aaa" }}>Phân bổ tỷ trọng tối ưu & Kiểm thử quá khứ.</p>
 
         <div style={inputGroup}>
           <label>Portfolio Assets:</label>
@@ -157,9 +242,28 @@ function App() {
           <small style={{ display: "block", marginTop: "5px", color: "#888" }}>Eta cao = Thích ứng nhanh (Aggressive). Eta thấp = Ổn định (Conservative).</small>
         </div>
 
-        <button onClick={runOPS} style={btnStyle} disabled={loadingOPS}>
-          {loadingOPS ? "Optimizing..." : "Calculate Optimal Weights"}
-        </button>
+        <div style={inputGroup}>
+          <label>Max Weight (0.0 - 1.0):</label>
+          <input
+            type="number"
+            step="0.1"
+            max="1.0"
+            min="0.1"
+            value={opsMaxWeight}
+            onChange={(e) => setOpsMaxWeight(e.target.value)}
+            style={inputStyle}
+          />
+          <small style={{ display: "block", marginTop: "5px", color: "#888" }}>Tỷ trọng tối đa cho một mã (VD: 0.5 = Max 50%).</small>
+        </div>
+
+        <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
+          <button onClick={runOPS} style={{ ...btnStyle, flex: 1 }} disabled={loadingOPS}>
+            {loadingOPS ? "Optimizing..." : "TÍNH TỶ TRỌNG NGAY ⚖️"}
+          </button>
+          <button onClick={runBacktest} style={{ ...btnStyle, backgroundColor: "#0091ea", flex: 1 }} disabled={loadingBacktest}>
+            {loadingBacktest ? "Đang giả lập..." : "KIỂM THỬ QUÁ KHỨ 📈"}
+          </button>
+        </div>
 
         {opsResult && (
           <div style={resultBox}>
@@ -188,6 +292,38 @@ function App() {
             </table>
           </div>
         )}
+
+        {/* KẾT QUẢ BACKTEST */}
+        {backtestResult && (
+          <div style={{ marginTop: "20px", padding: "15px", backgroundColor: "#1a1a1a", borderRadius: "8px", border: "1px solid #333" }}>
+
+            {/* 1. Bảng chỉ số */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginBottom: "20px" }}>
+              <div style={{ padding: "10px", background: "rgba(0, 230, 118, 0.1)", borderRadius: "5px", border: "1px solid #00e676" }}>
+                <h4 style={{ margin: "0 0 10px 0", color: "#00e676" }}>🤖 Thuật toán OPS</h4>
+                <div>Lợi nhuận: <b>{backtestResult.metrics.strategy.total_return}%</b></div>
+                <div>Sharpe Ratio: <b>{backtestResult.metrics.strategy.sharpe_ratio}</b></div>
+                <div>Sụt giảm (Drawdown): <b style={{ color: "#ff1744" }}>{backtestResult.metrics.strategy.max_drawdown}%</b></div>
+              </div>
+              <div style={{ padding: "10px", background: "rgba(255, 255, 255, 0.05)", borderRadius: "5px", border: "1px solid #555" }}>
+                <h4 style={{ margin: "0 0 10px 0", color: "#aaa" }}>🐢 Mua & Giữ (Benchmark)</h4>
+                <div>Lợi nhuận: <b>{backtestResult.metrics.benchmark.total_return}%</b></div>
+                <div>Sharpe Ratio: <b>{backtestResult.metrics.benchmark.sharpe_ratio}</b></div>
+                <div>Sụt giảm (Drawdown): <b style={{ color: "#ff1744" }}>{backtestResult.metrics.benchmark.max_drawdown}%</b></div>
+              </div>
+            </div>
+
+            {/* 2. Biểu đồ */}
+            <div style={{ height: "300px" }}>
+              <Line options={chartOptions} data={chartData} />
+            </div>
+
+            <p style={{ fontSize: "12px", color: "#666", textAlign: "center", marginTop: "10px" }}>
+              *Dữ liệu giả lập 1 năm gần nhất. Quá khứ không đảm bảo tương lai.
+            </p>
+          </div>
+        )}
+
       </div>
 
     </div>
