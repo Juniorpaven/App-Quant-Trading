@@ -362,24 +362,42 @@ try:
 except Exception as e:
     print(f"❌ Lỗi load model: {e}")
 
-# Hàm tính chỉ báo (Phải GIỐNG HỆT lúc train bên Colab)
+# --- HÀM TÍNH CHỈ BÁO (PHẢI KHỚP 100% VỚI COLAB) ---
 def calculate_features(df):
-    # RSI
+    # 1. RSI
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / loss
     df['RSI'] = 100 - (100 / (1 + rs))
     
-    # SMA 20 & Distance
+    # 2. SMA 20 & Distance
     df['SMA_20'] = df['Close'].rolling(window=20).mean()
     df['Dist_SMA20'] = (df['Close'] - df['SMA_20']) / df['SMA_20']
     
-    # Return & Volatility
+    # 3. MACD (MỚI)
+    ema12 = df['Close'].ewm(span=12, adjust=False).mean()
+    ema26 = df['Close'].ewm(span=26, adjust=False).mean()
+    df['MACD'] = ema12 - ema26
+    df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+    df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
+
+    # 4. Bollinger Bands %B (MỚI)
+    std_20 = df['Close'].rolling(window=20).std()
+    upper = df['SMA_20'] + (2 * std_20)
+    lower = df['SMA_20'] - (2 * std_20)
+    # Tránh chia cho 0
+    df['BB_PctB'] = (df['Close'] - lower) / (upper - lower)
+
+    # 5. Volume Ratio (MỚI)
+    vol_sma20 = df['Volume'].rolling(window=20).mean()
+    df['Vol_Ratio'] = df['Volume'] / vol_sma20
+
+    # 6. Volatility (Giữ nguyên)
     df['Return_1d'] = df['Close'].pct_change()
     df['Vol_20'] = df['Return_1d'].rolling(window=20).std()
     
-    return df.dropna() # Bỏ các dòng NaN đầu tiên
+    return df.dropna()
 
 class AiRequest(BaseModel):
     ticker: str
@@ -387,55 +405,54 @@ class AiRequest(BaseModel):
 @app.post("/api/ask-ai")
 def ask_ai_endpoint(req: AiRequest):
     if ai_model is None:
-        raise HTTPException(status_code=500, detail="Chưa có AI Model trên Server. Hãy đảm bảo đã upload file .pkl.")
+        raise HTTPException(status_code=500, detail="Server chưa có não AI (.pkl).")
     
     try:
-        # 1. Lấy dữ liệu 3 tháng gần nhất (để đủ tính RSI, SMA)
         ticker = req.ticker.strip().upper()
-        # Fix mã cho yfinance
-        if not ticker.endswith(".VN") and not "-" in ticker: 
-             # Logic đơn giản, nếu bạn nhập HPG -> HPG.VN
-             ticker += ".VN" 
+        # Logic fix mã chứng khoán
+        if not ticker.endswith(".VN") and "-" not in ticker and len(ticker) <= 3: 
+             ticker += ".VN"
              
-        data = yf.download(ticker, period="3mo", progress=False)
+        # Lấy 1 năm dữ liệu để đảm bảo tính chỉ báo đủ
+        data = yf.download(ticker, period="1y", progress=False)
         
-        if len(data) < 30:
-             raise HTTPException(status_code=400, detail="Không đủ dữ liệu lịch sử để tính chỉ báo.")
+        if len(data) < 60:
+             raise HTTPException(status_code=400, detail="Không đủ dữ liệu lịch sử.")
              
-        # Chuẩn hóa cột
+        # Fix lỗi MultiIndex của yfinance
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = data.columns.get_level_values(0)
             
-        # 2. Tính toán Features
+        # Tính toán
         processed_data = calculate_features(data)
-        
-        if processed_data.empty:
-            raise HTTPException(status_code=400, detail="Không thể tính toán chỉ báo kỹ thuật (Dữ liệu không đủ).")
-
-        # Lấy dòng cuối cùng (Ngày mới nhất) để dự báo cho mai
         last_row = processed_data.iloc[[-1]]
         
-        # Chọn đúng 4 cột features như lúc train
-        features = last_row[['RSI', 'Dist_SMA20', 'Return_1d', 'Vol_20']]
+        # --- QUAN TRỌNG: CHỌN ĐÚNG CỘT KHỚP VỚI FILE .PKL ---
+        # Danh sách này phải giống hệt lúc bạn train trên Colab
+        feature_cols = ['RSI', 'Dist_SMA20', 'MACD_Hist', 'BB_PctB', 'Vol_Ratio', 'Vol_20']
         
-        # 3. Dự đoán
-        prediction = ai_model.predict(features)[0] # 0 hoặc 1
-        probs = ai_model.predict_proba(features)[0] # Xác suất [prob_giam, prob_tang]
+        features = last_row[feature_cols]
+        
+        # Dự đoán
+        prediction = ai_model.predict(features)[0]
+        probs = ai_model.predict_proba(features)[0]
         
         signal = "TĂNG 📈" if prediction == 1 else "GIẢM 📉"
-        confidence = probs[prediction] # Độ tin cậy (ví dụ 0.75)
+        confidence = probs[prediction]
         
         return {
             "ticker": ticker,
-            "date": str(last_row.index[0].date()),
             "signal": signal,
             "confidence": round(confidence * 100, 2),
             "details": {
                 "RSI": round(features['RSI'].values[0], 2),
-                "Trend_SMA": round(features['Dist_SMA20'].values[0] * 100, 2)
+                "MACD": round(features['MACD_Hist'].values[0], 4),
+                "BB_Pct": round(features['BB_PctB'].values[0], 2),
+                "Vol_Rat": round(features['Vol_Ratio'].values[0], 2)
             }
         }
         
     except Exception as e:
-        print(f"AI Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Lỗi: {e}")
+        # Trả về lỗi chi tiết để dễ debug
+        raise HTTPException(status_code=500, detail=f"Lỗi tính toán: {str(e)}")
