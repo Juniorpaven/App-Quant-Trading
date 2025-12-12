@@ -41,6 +41,7 @@ function App() {
   // State cho OPS
   const [opsTickers, setOpsTickers] = useState("AAPL, MSFT, GOOGL, AMZN");
   const [opsEta, setOpsEta] = useState(0.05);
+  const [opsLookbacks, setOpsLookbacks] = useState("20, 60, 120"); // State mới cho Ensemble Lookbacks
   // Thêm state mới OPS Max Weight
   const [opsMaxWeight, setOpsMaxWeight] = useState(1.0);
   const [opsResult, setOpsResult] = useState(null);
@@ -49,6 +50,11 @@ function App() {
   // --- STATE MỚI CHO BACKTEST ---
   const [backtestResult, setBacktestResult] = useState(null);
   const [loadingBacktest, setLoadingBacktest] = useState(false);
+
+  // --- STATE CHO AI ENGINE ---
+  const [aiTicker, setAiTicker] = useState("HPG.VN");
+  const [aiResult, setAiResult] = useState(null);
+  const [loadingAI, setLoadingAI] = useState(false);
 
   // 1. Check Backend
   const checkBackend = async () => {
@@ -87,7 +93,8 @@ function App() {
     try {
       const res = await axios.post(`${API_URL}/api/run-ops`, {
         tickers: opsTickers,
-        eta: Number(opsEta)
+        eta: Number(opsEta),
+        lookbacks: opsLookbacks // Gửi chuỗi lookback
       });
       setOpsResult(res.data.weights);
     } catch (err) {
@@ -117,6 +124,19 @@ function App() {
       alert(`Backtest Error: ${errorMsg}`);
     }
     setLoadingBacktest(false);
+  };
+
+  // 5. Ask AI
+  const askAI = async () => {
+    setLoadingAI(true);
+    setAiResult(null);
+    try {
+      const res = await axios.post(`${API_URL}/api/ask-ai`, { ticker: aiTicker });
+      setAiResult(res.data);
+    } catch (err) {
+      alert("Lỗi AI: " + (err.response?.data?.detail || err.message));
+    }
+    setLoadingAI(false);
   };
 
   // --- CẤU HÌNH BIỂU ĐỒ ---
@@ -216,6 +236,39 @@ function App() {
         )}
       </div>
 
+      {/* SECTION: AI PREDICTION ENGINE */}
+      <div style={{ ...cardStyle, borderLeft: "4px solid #e91e63" }}> {/* Màu hồng AI */}
+        <h2>🤖 AI Oracle (Random Forest)</h2>
+        <p style={{ fontSize: "13px", color: "#aaa" }}>Dự báo xu hướng ngày mai dựa trên mô hình Máy học.</p>
+
+        <div style={inputGroup}>
+          <label>Mã Cổ Phiếu:</label>
+          <input
+            value={aiTicker}
+            onChange={(e) => setAiTicker(e.target.value)}
+            style={inputStyle}
+            placeholder="VD: HPG.VN"
+          />
+        </div>
+
+        <button onClick={askAI} style={{ ...btnStyle, backgroundColor: "#e91e63" }} disabled={loadingAI}>
+          {loadingAI ? "AI đang suy nghĩ..." : "HỎI AI NGAY 🔮"}
+        </button>
+
+        {aiResult && (
+          <div style={{ marginTop: "15px", padding: "15px", backgroundColor: "#2d1b2e", borderRadius: "8px", textAlign: "center" }}>
+            <h3 style={{ margin: 0, color: aiResult.signal.includes("TĂNG") ? "#00e676" : "#ff1744" }}>
+              Dự báo: {aiResult.signal}
+            </h3>
+            <p>Độ tin cậy: <b>{aiResult.confidence}%</b></p>
+            <div style={{ fontSize: "12px", color: "#ccc", marginTop: "10px", display: "flex", justifyContent: "space-around" }}>
+              <span>RSI: {aiResult.details.RSI}</span>
+              <span>Cách SMA20: {aiResult.details.Trend_SMA}%</span>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* SECTION: OPS ENGINE & BACKTEST */}
       <div style={cardStyle}>
         <h2>⚖️ Portfolio Optimization & Backtest</h2>
@@ -229,6 +282,17 @@ function App() {
             style={{ ...inputStyle, resize: "vertical", minHeight: "60px" }}
             rows={3}
           />
+        </div>
+        <div style={inputGroup}>
+          <label>Ensemble Lookbacks (days):</label>
+          <input
+            type="text"
+            value={opsLookbacks}
+            onChange={(e) => setOpsLookbacks(e.target.value)}
+            placeholder="e.g. 20, 60, 120"
+            style={inputStyle}
+          />
+          <small style={{ display: "block", marginTop: "5px", color: "#888" }}>Dynamic Momentum: Kết hợp 3 chiến lược (Ngắn, Trung, Dài).</small>
         </div>
         <div style={inputGroup}>
           <label>Learning Rate (Eta):</label>

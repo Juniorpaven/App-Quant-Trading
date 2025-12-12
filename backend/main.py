@@ -132,9 +132,10 @@ def apply_max_weight_constraint(weights, max_weight):
             
     return weights
 
-def run_backtest_simulation(data, eta=0.05, max_weight=1.0):
+def run_backtest_simulation(data, eta=0.05, max_weight=1.0, transaction_fee=0.0015):
     """
     Giả lập hiệu suất đầu tư theo thời gian thực.
+    Có tính phí giao dịch (Transaction Costs) để tránh bị "lừa" bởi lãi ảo.
     """
     returns = data.pct_change().dropna()
     dates = returns.index.strftime('%Y-%m-%d').tolist()
@@ -149,32 +150,52 @@ def run_backtest_simulation(data, eta=0.05, max_weight=1.0):
     # 2. Vòng lặp mô phỏng từng ngày
     for t in range(T):
         # --- CHIẾN LƯỢC OPS ---
-        # Lợi nhuận ngày hôm nay của Portfolio
+        # Lợi nhuận ngày hôm nay của Portfolio (Gross Return)
         day_ret = np.dot(weights, returns_np[t])
         
-        # Cập nhật tổng tài sản
-        new_wealth = portfolio_wealth[-1] * (1 + day_ret)
-        portfolio_wealth.append(new_wealth)
+        # Giá trị tài sản trước phí (End of Day Wealth)
+        wealth_before_cost = portfolio_wealth[-1] * (1 + day_ret)
         
-        # Cập nhật trọng số cho ngày mai (Học từ hôm nay)
-        # (Sử dụng lại logic EG có Constraints)
+        # --- TÍNH TOÁN PHÍ GIAO DỊCH (Transaction Costs) ---
+        # Tính tỷ trọng bị trôi (Drifted Weights) do giá thay đổi trong ngày
+        # w_drifted = w * (1 + r) / (1 + R_p)
+        if (1 + day_ret) == 0:
+             drifted_weights = weights # Should almost never happen
+        else:
+             drifted_weights = weights * (1 + returns_np[t]) / (1 + day_ret)
+        
+        # Cập nhật trọng số TỐI ƯU cho ngày mai (Learning Algo)
         if day_ret == 0: day_ret = 1e-10
         exponent = eta * returns_np[t] / day_ret
         exponent = np.clip(exponent, -30, 30) # Safer clip
-        weights = weights * np.exp(exponent)
-        weights /= np.sum(weights) # Chuẩn hóa
-        weights = apply_max_weight_constraint(weights, max_weight) # Áp dụng giới hạn
+        new_weights = weights * np.exp(exponent)
+        new_weights /= np.sum(new_weights) # Chuẩn hóa
+        new_weights = apply_max_weight_constraint(new_weights, max_weight) # Áp dụng giới hạn
+        
+        # Tính Turnover: Tổng lượng hàng cần mua/bán để chuyển từ Drifted -> New Weights
+        # Turnover = sum(|w_new - w_drifted|)
+        turnover = np.sum(np.abs(new_weights - drifted_weights))
+        
+        # Chi phí = Turnover * Fee
+        # Mặc định fee = 0.15% (0.0015)
+        cost_fraction = turnover * transaction_fee
+        
+        # Trừ phí vào tài sản
+        # Wealth_final = Wealth_before_cost * (1 - cost_fraction)
+        portfolio_wealth.append(wealth_before_cost * (1 - cost_fraction))
+        
+        # Cập nhật weights cho vòng lặp sau
+        weights = new_weights
         
         # --- BENCHMARK (BUY & HOLD) ---
-        # Giả sử mua đều từ đầu và giữ nguyên, không tái cân bằng
-        # Lợi nhuận trung bình của các mã
+        # Giả sử mua đều từ đầu và giữ nguyên, không tái cân bằng -> Không mất phí
         bench_ret = np.mean(returns_np[t])
         new_bench = benchmark_wealth[-1] * (1 + bench_ret)
         benchmark_wealth.append(new_bench)
         
     return {
-        "dates": dates, # Trục thời gian (bỏ ngày đầu tiên vì chưa có return)
-        "strategy": portfolio_wealth[1:], # Bỏ giá trị khởi tạo 1.0
+        "dates": dates,
+        "strategy": portfolio_wealth[1:],
         "benchmark": benchmark_wealth[1:]
     }
 
@@ -219,12 +240,14 @@ class NTFRequest(BaseModel):
 class OPSRequest(BaseModel):
     tickers: str
     eta: float = 0.05 # Learning rate
+    lookbacks: str = "20, 60, 120" # Chuỗi các lookback cho chiến lược Ensemble
 
 class BacktestRequest(BaseModel):
     tickers: str
     eta: float = 0.05
     max_weight: float = 1.0
     period: str = "1y" # 1 năm
+    transaction_fee: float = 0.0015 # Phí giao dịch (0.15%)
 
 # --- ENDPOINTS ---
 
@@ -253,9 +276,45 @@ def run_ops_endpoint(req: OPSRequest):
     if len(ticker_list) < 2:
          raise HTTPException(status_code=400, detail="OPS cần ít nhất 2 tài sản để phân bổ.")
     try:
-        data = get_data(ticker_list)
-        weights = calculate_ops_eg(data, req.eta)
-        return {"status": "success", "weights": weights, "algo": "Exponential Gradient"}
+        # Lấy lookbacks từ request
+        try:
+            lookbacks = [int(x.strip()) for x in req.lookbacks.split(",")]
+        except ValueError:
+             raise HTTPException(status_code=400, detail="Lookbacks phải là danh sách số nguyên, ví dụ: '20, 60, 120'")
+        
+        data = get_data(ticker_list) # Mặc định lấy 1y data
+        
+        # Khởi tạo dict chứa tổng weights
+        final_weights = {ticker: 0.0 for ticker in data.columns}
+        
+        # Vòng lặp Ensemble
+        valid_strategies = 0
+        for lb in lookbacks:
+            # Slice data theo lookback (Lấy lb ngày gần nhất)
+            if lb > len(data):
+                sub_data = data # Lấy hết nếu lookback lớn hơn dữ liệu có sẵn
+            else:
+                sub_data = data.iloc[-lb:]
+            
+            if sub_data.empty: continue
+            
+            # Tính weights cho chiến lược con này
+            w = calculate_ops_eg(sub_data, req.eta)
+            valid_strategies += 1
+            
+            # Cộng dồn
+            for ticker, weight in w.items():
+                if ticker in final_weights:
+                    final_weights[ticker] += weight
+        
+        # Chia trung bình
+        if valid_strategies > 0:
+            for ticker in final_weights:
+                final_weights[ticker] /= valid_strategies
+                # Làm tròn
+                final_weights[ticker] = round(final_weights[ticker], 4)
+        
+        return {"status": "success", "weights": final_weights, "algo": "Ensemble EG (Dynamic Momentum)"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -269,7 +328,7 @@ def backtest_endpoint(req: BacktestRequest):
         data = get_data(ticker_list, period=req.period)
         
         # Chạy giả lập
-        sim_result = run_backtest_simulation(data, req.eta, req.max_weight)
+        sim_result = run_backtest_simulation(data, req.eta, req.max_weight, req.transaction_fee)
         
         # Tính chỉ số
         stats_strat = calculate_metrics(sim_result["strategy"])
@@ -284,4 +343,99 @@ def backtest_endpoint(req: BacktestRequest):
             }
         }
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- AI ENGINE (Load Model) ---
+import joblib
+import os
+
+# Kiểm tra xem có file model không
+MODEL_PATH = "quant_ai_model.pkl"
+ai_model = None
+
+try:
+    if os.path.exists(MODEL_PATH):
+        ai_model = joblib.load(MODEL_PATH)
+        print("✅ Đã load AI Model thành công!")
+    else:
+        print("⚠️ Không tìm thấy file model. Chức năng AI sẽ tắt.")
+except Exception as e:
+    print(f"❌ Lỗi load model: {e}")
+
+# Hàm tính chỉ báo (Phải GIỐNG HỆT lúc train bên Colab)
+def calculate_features(df):
+    # RSI
+    delta = df['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    df['RSI'] = 100 - (100 / (1 + rs))
+    
+    # SMA 20 & Distance
+    df['SMA_20'] = df['Close'].rolling(window=20).mean()
+    df['Dist_SMA20'] = (df['Close'] - df['SMA_20']) / df['SMA_20']
+    
+    # Return & Volatility
+    df['Return_1d'] = df['Close'].pct_change()
+    df['Vol_20'] = df['Return_1d'].rolling(window=20).std()
+    
+    return df.dropna() # Bỏ các dòng NaN đầu tiên
+
+class AiRequest(BaseModel):
+    ticker: str
+
+@app.post("/api/ask-ai")
+def ask_ai_endpoint(req: AiRequest):
+    if ai_model is None:
+        raise HTTPException(status_code=500, detail="Chưa có AI Model trên Server. Hãy đảm bảo đã upload file .pkl.")
+    
+    try:
+        # 1. Lấy dữ liệu 3 tháng gần nhất (để đủ tính RSI, SMA)
+        ticker = req.ticker.strip().upper()
+        # Fix mã cho yfinance
+        if not ticker.endswith(".VN") and not "-" in ticker: 
+             # Logic đơn giản, nếu bạn nhập HPG -> HPG.VN
+             ticker += ".VN" 
+             
+        data = yf.download(ticker, period="3mo", progress=False)
+        
+        if len(data) < 30:
+             raise HTTPException(status_code=400, detail="Không đủ dữ liệu lịch sử để tính chỉ báo.")
+             
+        # Chuẩn hóa cột
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = data.columns.get_level_values(0)
+            
+        # 2. Tính toán Features
+        processed_data = calculate_features(data)
+        
+        if processed_data.empty:
+            raise HTTPException(status_code=400, detail="Không thể tính toán chỉ báo kỹ thuật (Dữ liệu không đủ).")
+
+        # Lấy dòng cuối cùng (Ngày mới nhất) để dự báo cho mai
+        last_row = processed_data.iloc[[-1]]
+        
+        # Chọn đúng 4 cột features như lúc train
+        features = last_row[['RSI', 'Dist_SMA20', 'Return_1d', 'Vol_20']]
+        
+        # 3. Dự đoán
+        prediction = ai_model.predict(features)[0] # 0 hoặc 1
+        probs = ai_model.predict_proba(features)[0] # Xác suất [prob_giam, prob_tang]
+        
+        signal = "TĂNG 📈" if prediction == 1 else "GIẢM 📉"
+        confidence = probs[prediction] # Độ tin cậy (ví dụ 0.75)
+        
+        return {
+            "ticker": ticker,
+            "date": str(last_row.index[0].date()),
+            "signal": signal,
+            "confidence": round(confidence * 100, 2),
+            "details": {
+                "RSI": round(features['RSI'].values[0], 2),
+                "Trend_SMA": round(features['Dist_SMA20'].values[0] * 100, 2)
+            }
+        }
+        
+    except Exception as e:
+        print(f"AI Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
