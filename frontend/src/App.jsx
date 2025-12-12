@@ -243,17 +243,22 @@ function App() {
             </button>
 
             {aiResult && (
-              <div style={{ ...resultBox, padding: "10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: "18px", color: aiResult.signal.includes("TĂNG") ? "#00e676" : "#ff1744" }}>
-                    {aiResult.signal}
-                  </h3>
-                  <div style={{ fontSize: "12px", color: "#ccc" }}>Conf: {aiResult.confidence}%</div>
+              <div style={{ marginTop: "15px", padding: "15px", backgroundColor: "#2d1b2e", borderRadius: "8px", textAlign: "center" }}>
+                <h3 style={{ margin: "0 0 10px 0", fontSize: "24px", color: aiResult.signal.includes("TĂNG") ? "#00e676" : "#ff1744" }}>
+                  {aiResult.signal}
+                </h3>
+                <div style={{ marginBottom: "15px", color: "#ddd" }}>Độ tin cậy: <b>{aiResult.confidence}%</b></div>
+
+                {/* LƯỚI CHỈ SỐ KỸ THUẬT */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", fontSize: "13px", textAlign: "left", backgroundColor: "rgba(0,0,0,0.2)", padding: "10px", borderRadius: "6px" }}>
+                  <div>RSI (Sức mạnh): <b style={{ color: "#ffd700" }}>{aiResult.details.RSI}</b></div>
+                  <div>MACD (Xu hướng): <b style={{ color: aiResult.details.MACD > 0 ? "#00e676" : "#ff1744" }}>{aiResult.details.MACD}</b></div>
+                  <div>Bollinger (%B): <b>{aiResult.details.BB_Pct}</b></div>
+                  <div>Vol Ratio (Tiền): <b style={{ color: aiResult.details.Vol_Rat > 1 ? "#00e676" : "#aaa" }}>{aiResult.details.Vol_Rat}x</b></div>
                 </div>
-                <div style={{ textAlign: "right", fontSize: "12px" }}>
-                  <div>RSI: <b>{aiResult.details.RSI}</b></div>
-                  <div>SMA: <b>{aiResult.details.Trend_SMA}%</b></div>
-                </div>
+                <p style={{ fontSize: "11px", color: "#666", marginTop: "5px", fontStyle: "italic" }}>
+                  *MACD {'>'} 0: Tăng. %B {'>'} 1: Quá mua. Vol {'>'} 1: Tiền vào mạnh.
+                </p>
               </div>
             )}
           </div>
