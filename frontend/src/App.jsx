@@ -229,20 +229,18 @@ function App() {
           <div style={{ ...cardStyle, borderLeft: "4px solid #e91e63" }}>
             <h2>🤖 AI Oracle</h2>
 
-            <div style={{ display: "flex", gap: "10px", alignItems: "flex-end" }}>
-              <div style={{ ...inputGroup, flex: 1, marginBottom: 0 }}>
-                <label>Ticker:</label>
-                <input
-                  value={aiTicker}
-                  onChange={(e) => setAiTicker(e.target.value)}
-                  style={inputStyle}
-                  placeholder="VD: HPG.VN"
-                />
-              </div>
-              <button onClick={askAI} style={{ ...btnStyle, backgroundColor: "#e91e63", padding: "10px" }} disabled={loadingAI}>
-                {loadingAI ? "..." : "ASK AI 🔮"}
-              </button>
+            <div style={inputGroup}>
+              <label>Ticker:</label>
+              <input
+                value={aiTicker}
+                onChange={(e) => setAiTicker(e.target.value)}
+                style={inputStyle}
+                placeholder="VD: HPG.VN"
+              />
             </div>
+            <button onClick={askAI} style={{ ...btnStyle, backgroundColor: "#e91e63" }} disabled={loadingAI}>
+              {loadingAI ? "Scanning..." : "ASK AI 🔮"}
+            </button>
 
             {aiResult && (
               <div style={{ ...resultBox, padding: "10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
