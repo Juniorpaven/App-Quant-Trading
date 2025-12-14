@@ -388,6 +388,7 @@ def calculate_features(df):
     lower = df['SMA_20'] - (2 * std_20)
     # Tránh chia cho 0
     df['BB_PctB'] = (df['Close'] - lower) / (upper - lower)
+    df['BandWidth'] = (upper - lower) / df['SMA_20']
 
     # 5. Volume Ratio (MỚI)
     vol_sma20 = df['Volume'].rolling(window=20).mean()
@@ -429,7 +430,7 @@ def ask_ai_endpoint(req: AiRequest):
         
         # --- QUAN TRỌNG: CHỌN ĐÚNG CỘT KHỚP VỚI FILE .PKL ---
         # Danh sách này phải giống hệt lúc bạn train trên Colab
-        feature_cols = ['RSI', 'Dist_SMA20', 'MACD_Hist', 'BB_PctB', 'Vol_Ratio', 'Vol_20']
+        feature_cols = ['RSI', 'Dist_SMA20', 'MACD_Hist', 'BB_PctB', 'Vol_Ratio', 'Vol_20', 'BandWidth']
         
         features = last_row[feature_cols]
         
@@ -439,6 +440,14 @@ def ask_ai_endpoint(req: AiRequest):
         
         signal = "TĂNG 📈" if prediction == 1 else "GIẢM 📉"
         confidence = probs[prediction]
+
+        # Wyckoff Logic
+        bw_val = features['BandWidth'].values[0]
+        wyckoff_status = "Bình thường"
+        if bw_val < 0.10: 
+            wyckoff_status = "NÚT CỔ CHAI (Sắp nổ) 💣"
+        elif bw_val > 0.40:
+            wyckoff_status = "BIẾN ĐỘNG MẠNH 🌊"
         
         return {
             "ticker": ticker,
@@ -448,7 +457,9 @@ def ask_ai_endpoint(req: AiRequest):
                 "RSI": round(features['RSI'].values[0], 2),
                 "MACD": round(features['MACD_Hist'].values[0], 4),
                 "BB_Pct": round(features['BB_PctB'].values[0], 2),
-                "Vol_Rat": round(features['Vol_Ratio'].values[0], 2)
+                "Vol_Rat": round(features['Vol_Ratio'].values[0], 2),
+                "BandWidth": round(bw_val, 3),
+                "Wyckoff": wyckoff_status
             }
         }
         
@@ -456,5 +467,6 @@ def ask_ai_endpoint(req: AiRequest):
         print(f"Lỗi: {e}")
         # Trả về lỗi chi tiết để dễ debug
         raise HTTPException(status_code=500, detail=f"Lỗi tính toán: {str(e)}")
-\ n #   F o r c e   D e p l o y   U p d a t e  
+\ n #   F o r c e   D e p l o y   U p d a t e 
+ 
  

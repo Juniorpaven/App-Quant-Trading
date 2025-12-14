@@ -243,22 +243,42 @@ function App() {
             </button>
 
             {aiResult && (
-              <div style={{ marginTop: "15px", padding: "15px", backgroundColor: "#2d1b2e", borderRadius: "8px", textAlign: "center" }}>
-                <h3 style={{ margin: "0 0 10px 0", fontSize: "24px", color: aiResult.signal.includes("TĂNG") ? "#00e676" : "#ff1744" }}>
+              <div style={{ marginTop: "15px", padding: "15px", backgroundColor: "#2d1b2e", borderRadius: "8px", textAlign: "center", border: "1px solid #4a2f4c" }}>
+
+                {/* Phần Tín hiệu chính */}
+                <h3 style={{ margin: "0 0 5px 0", fontSize: "28px", color: aiResult.signal.includes("TĂNG") ? "#00e676" : "#ff1744" }}>
                   {aiResult.signal}
                 </h3>
-                <div style={{ marginBottom: "15px", color: "#ddd" }}>Độ tin cậy: <b>{aiResult.confidence}%</b></div>
-
-                {/* LƯỚI CHỈ SỐ KỸ THUẬT */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", fontSize: "13px", textAlign: "left", backgroundColor: "rgba(0,0,0,0.2)", padding: "10px", borderRadius: "6px" }}>
-                  <div>RSI (Sức mạnh): <b style={{ color: "#ffd700" }}>{aiResult.details.RSI}</b></div>
-                  <div>MACD (Xu hướng): <b style={{ color: aiResult.details.MACD > 0 ? "#00e676" : "#ff1744" }}>{aiResult.details.MACD}</b></div>
-                  <div>Bollinger (%B): <b>{aiResult.details.BB_Pct}</b></div>
-                  <div>Vol Ratio (Tiền): <b style={{ color: aiResult.details.Vol_Rat > 1 ? "#00e676" : "#aaa" }}>{aiResult.details.Vol_Rat}x</b></div>
+                <div style={{ marginBottom: "15px", color: "#aaa", fontSize: "14px" }}>
+                  Độ tin cậy: <b style={{ color: "#fff" }}>{aiResult.confidence}%</b>
                 </div>
-                <p style={{ fontSize: "11px", color: "#666", marginTop: "5px", fontStyle: "italic" }}>
-                  *MACD {'>'} 0: Tăng. %B {'>'} 1: Quá mua. Vol {'>'} 1: Tiền vào mạnh.
-                </p>
+
+                {/* Phần Cảnh báo Wyckoff (MỚI) - Chỉ hiện khi có Squeeze */}
+                {aiResult.details.Wyckoff.includes("NÚT CỔ CHAI") && (
+                  <div style={{ backgroundColor: "#ffeb3b", color: "#000", padding: "5px", borderRadius: "4px", marginBottom: "10px", fontWeight: "bold", fontSize: "13px" }}>
+                    ⚠️ CẢNH BÁO: {aiResult.details.Wyckoff}
+                  </div>
+                )}
+
+                {/* Lưới chỉ số */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", fontSize: "13px", textAlign: "left", backgroundColor: "rgba(0,0,0,0.3)", padding: "12px", borderRadius: "8px" }}>
+
+                  {/* Hàng 1 */}
+                  <div>RSI: <b style={{ color: getRsiColor(aiResult.details.RSI) }}>{aiResult.details.RSI}</b></div>
+                  <div>MACD: <b style={{ color: aiResult.details.MACD > 0 ? "#00e676" : "#ff1744" }}>{aiResult.details.MACD}</b></div>
+
+                  {/* Hàng 2 */}
+                  <div>Vol Ratio: <b style={{ color: aiResult.details.Vol_Rat > 1 ? "#00e676" : "#aaa" }}>{aiResult.details.Vol_Rat}x</b></div>
+                  <div>%B (Vị trí): <b>{aiResult.details.BB_Pct}</b></div>
+
+                  {/* Hàng 3 (MỚI - WYCKOFF) */}
+                  <div style={{ gridColumn: "1 / span 2", borderTop: "1px solid #555", paddingTop: "8px", marginTop: "4px" }}>
+                    <div>BandWidth (Độ nén): <b style={{ color: "#00b0ff" }}>{aiResult.details.BandWidth}</b></div>
+                    <div style={{ fontSize: "11px", color: "#bbb", fontStyle: "italic" }}>
+                      Trạng thái: {aiResult.details.Wyckoff}
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -448,6 +468,12 @@ const resultBox = {
   backgroundColor: "#1e1e1e",
   borderRadius: "4px",
   borderLeft: "3px solid #646cff"
+};
+
+const getRsiColor = (rsi) => {
+  if (rsi > 70) return "#ff1744"; // Đỏ (Nóng)
+  if (rsi < 30) return "#00e676"; // Xanh (Đáy)
+  return "#ffd700"; // Vàng
 };
 
 export default App
