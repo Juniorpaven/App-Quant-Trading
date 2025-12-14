@@ -254,7 +254,8 @@ function App() {
                 </div>
 
                 {/* Phần Cảnh báo Wyckoff (MỚI) - Chỉ hiện khi có Squeeze */}
-                {aiResult.details.Wyckoff.includes("NÚT CỔ CHAI") && (
+                {/* Phần Cảnh báo Wyckoff (MỚI) - Chỉ hiện khi có Squeeze */}
+                {aiResult.details.Wyckoff && aiResult.details.Wyckoff.includes("NÚT CỔ CHAI") && (
                   <div style={{ backgroundColor: "#ffeb3b", color: "#000", padding: "5px", borderRadius: "4px", marginBottom: "10px", fontWeight: "bold", fontSize: "13px" }}>
                     ⚠️ CẢNH BÁO: {aiResult.details.Wyckoff}
                   </div>

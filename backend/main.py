@@ -467,6 +467,3 @@ def ask_ai_endpoint(req: AiRequest):
         print(f"Lỗi: {e}")
         # Trả về lỗi chi tiết để dễ debug
         raise HTTPException(status_code=500, detail=f"Lỗi tính toán: {str(e)}")
-\ n #   F o r c e   D e p l o y   U p d a t e 
- 
- 
