@@ -243,43 +243,55 @@ function App() {
             </button>
 
             {aiResult && (
-              <div style={{ marginTop: "15px", padding: "15px", backgroundColor: "#2d1b2e", borderRadius: "8px", textAlign: "center", border: "1px solid #4a2f4c" }}>
+              <div style={{ marginTop: "20px", padding: "20px", backgroundColor: "#2d1b2e", borderRadius: "12px", border: "1px solid #ff0055" }}>
 
-                {/* Phần Tín hiệu chính */}
-                <h3 style={{ margin: "0 0 5px 0", fontSize: "28px", color: aiResult.signal.includes("TĂNG") ? "#00e676" : "#ff1744" }}>
+                {/* 1. PHẦN TÍN HIỆU (GIỮ NGUYÊN) */}
+                <h2 style={{ textAlign: "center", color: aiResult.signal.includes("TĂNG") ? "#00e676" : "#ff1744", fontSize: "32px", margin: "0" }}>
                   {aiResult.signal}
-                </h3>
-                <div style={{ marginBottom: "15px", color: "#aaa", fontSize: "14px" }}>
-                  Độ tin cậy: <b style={{ color: "#fff" }}>{aiResult.confidence}%</b>
-                </div>
+                </h2>
+                <p style={{ textAlign: "center", color: "#ddd", marginBottom: "20px" }}>
+                  Độ tin cậy: <b>{aiResult.confidence}%</b>
+                </p>
 
-                {/* Phần Cảnh báo Wyckoff (MỚI) - Chỉ hiện khi có Squeeze */}
-                {/* Phần Cảnh báo Wyckoff (MỚI) - Chỉ hiện khi có Squeeze */}
-                {aiResult.details.Wyckoff && aiResult.details.Wyckoff.includes("NÚT CỔ CHAI") && (
-                  <div style={{ backgroundColor: "#ffeb3b", color: "#000", padding: "5px", borderRadius: "4px", marginBottom: "10px", fontWeight: "bold", fontSize: "13px" }}>
-                    ⚠️ CẢNH BÁO: {aiResult.details.Wyckoff}
-                  </div>
-                )}
-
-                {/* Lưới chỉ số */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", fontSize: "13px", textAlign: "left", backgroundColor: "rgba(0,0,0,0.3)", padding: "12px", borderRadius: "8px" }}>
-
-                  {/* Hàng 1 */}
-                  <div>RSI: <b style={{ color: getRsiColor(aiResult.details.RSI) }}>{aiResult.details.RSI}</b></div>
+                {/* 2. LƯỚI CHỈ SỐ (CẬP NHẬT BANDWIDTH) */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "15px", backgroundColor: "rgba(0,0,0,0.3)", padding: "15px", borderRadius: "8px", marginBottom: "20px" }}>
+                  <div>RSI: <b style={{ color: "#ffd700" }}>{aiResult.details.RSI}</b></div>
                   <div>MACD: <b style={{ color: aiResult.details.MACD > 0 ? "#00e676" : "#ff1744" }}>{aiResult.details.MACD}</b></div>
-
-                  {/* Hàng 2 */}
                   <div>Vol Ratio: <b style={{ color: aiResult.details.Vol_Rat > 1 ? "#00e676" : "#aaa" }}>{aiResult.details.Vol_Rat}x</b></div>
                   <div>%B (Vị trí): <b>{aiResult.details.BB_Pct}</b></div>
 
-                  {/* Hàng 3 (MỚI - WYCKOFF) */}
-                  <div style={{ gridColumn: "1 / span 2", borderTop: "1px solid #555", paddingTop: "8px", marginTop: "4px" }}>
-                    <div>BandWidth (Độ nén): <b style={{ color: "#00b0ff" }}>{aiResult.details.BandWidth}</b></div>
-                    <div style={{ fontSize: "11px", color: "#bbb", fontStyle: "italic" }}>
-                      Trạng thái: {aiResult.details.Wyckoff}
-                    </div>
+                  {/* HIỂN THỊ BANDWIDTH MỚI */}
+                  <div style={{ gridColumn: "1 / span 2", borderTop: "1px solid #444", paddingTop: "10px", marginTop: "5px" }}>
+                    BandWidth (Độ nén): <b style={{ color: "#00e5ff" }}>{aiResult.details.BandWidth}</b>
+                    <br />
+                    <span style={{ fontSize: "11px", color: "#aaa", fontStyle: "italic" }}>
+                      {aiResult.details.BandWidth < 0.1 ? "⚠️ Đang nén chặt (Sắp nổ)" : "Bình thường"}
+                    </span>
                   </div>
                 </div>
+
+                {/* 3. BIỂU ĐỒ NẾN MINI (MỚI) */}
+                <div style={{ marginTop: "15px" }}>
+                  <h4 style={{ margin: "0 0 10px 0", color: "#888" }}>Biểu đồ kỹ thuật:</h4>
+                  {/* Dùng ảnh Chart tĩnh từ nguồn bên ngoài để nhẹ web */}
+                  <img
+                    src={`https://image.vietstock.vn/chart/TA/${aiResult.ticker.replace(".VN", "")}`}
+                    alt="Chart"
+                    style={{ width: "100%", borderRadius: "8px", border: "1px solid #444" }}
+                    onError={(e) => { e.target.style.display = 'none' }} // Ẩn nếu lỗi ảnh
+                  />
+                  <div style={{ textAlign: "center", marginTop: "10px" }}>
+                    <a
+                      href={`https://fireant.vn/ma-chung-khoan/${aiResult.ticker.replace(".VN", "")}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: "#00e5ff", textDecoration: "none", fontSize: "13px" }}
+                    >
+                      👉 Xem biểu đồ FireAnt chi tiết
+                    </a>
+                  </div>
+                </div>
+
               </div>
             )}
           </div>

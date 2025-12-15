@@ -388,7 +388,10 @@ def calculate_features(df):
     lower = df['SMA_20'] - (2 * std_20)
     # Tránh chia cho 0
     df['BB_PctB'] = (df['Close'] - lower) / (upper - lower)
+    
+    # --- THÊM DÒNG NÀY ---
     df['BandWidth'] = (upper - lower) / df['SMA_20']
+    # ---------------------
 
     # 5. Volume Ratio (MỚI)
     vol_sma20 = df['Volume'].rolling(window=20).mean()
@@ -458,8 +461,10 @@ def ask_ai_endpoint(req: AiRequest):
                 "MACD": round(features['MACD_Hist'].values[0], 4),
                 "BB_Pct": round(features['BB_PctB'].values[0], 2),
                 "Vol_Rat": round(features['Vol_Ratio'].values[0], 2),
-                "BandWidth": round(bw_val, 3),
-                "Wyckoff": wyckoff_status
+                
+                # --- THÊM DÒNG NÀY ---
+                "BandWidth": round(features['BandWidth'].values[0], 4)
+                # ---------------------
             }
         }
         
