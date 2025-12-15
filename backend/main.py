@@ -432,20 +432,20 @@ def ask_ai_endpoint(req: AiRequest):
         last_row = processed_data.iloc[[-1]]
         
         # --- QUAN TRỌNG: CHỌN ĐÚNG CỘT KHỚP VỚI FILE .PKL ---
-        # Danh sách này phải giống hệt lúc bạn train trên Colab
-        feature_cols = ['RSI', 'Dist_SMA20', 'MACD_Hist', 'BB_PctB', 'Vol_Ratio', 'Vol_20', 'BandWidth']
+        # Danh sách này phải giống hệt lúc bạn train trên Colab (KHÔNG CÓ BandWidth)
+        feature_cols_ai = ['RSI', 'Dist_SMA20', 'MACD_Hist', 'BB_PctB', 'Vol_Ratio', 'Vol_20']
         
-        features = last_row[feature_cols]
+        features_for_ai = last_row[feature_cols_ai]
         
         # Dự đoán
-        prediction = ai_model.predict(features)[0]
-        probs = ai_model.predict_proba(features)[0]
+        prediction = ai_model.predict(features_for_ai)[0]
+        probs = ai_model.predict_proba(features_for_ai)[0]
         
         signal = "TĂNG 📈" if prediction == 1 else "GIẢM 📉"
         confidence = probs[prediction]
 
-        # Wyckoff Logic
-        bw_val = features['BandWidth'].values[0]
+        # Wyckoff Logic (Lấy từ last_row, không phải features_for_ai)
+        bw_val = last_row['BandWidth'].values[0]
         wyckoff_status = "Bình thường"
         if bw_val < 0.10: 
             wyckoff_status = "NÚT CỔ CHAI (Sắp nổ) 💣"
@@ -457,13 +457,14 @@ def ask_ai_endpoint(req: AiRequest):
             "signal": signal,
             "confidence": round(confidence * 100, 2),
             "details": {
-                "RSI": round(features['RSI'].values[0], 2),
-                "MACD": round(features['MACD_Hist'].values[0], 4),
-                "BB_Pct": round(features['BB_PctB'].values[0], 2),
-                "Vol_Rat": round(features['Vol_Ratio'].values[0], 2),
+                "RSI": round(features_for_ai['RSI'].values[0], 2),
+                "MACD": round(features_for_ai['MACD_Hist'].values[0], 4),
+                "BB_Pct": round(features_for_ai['BB_PctB'].values[0], 2),
+                "Vol_Rat": round(features_for_ai['Vol_Ratio'].values[0], 2),
                 
                 # --- THÊM DÒNG NÀY ---
-                "BandWidth": round(features['BandWidth'].values[0], 4)
+                "BandWidth": round(bw_val, 4),
+                "Wyckoff": wyckoff_status
                 # ---------------------
             }
         }
