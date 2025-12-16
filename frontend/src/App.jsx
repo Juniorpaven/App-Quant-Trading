@@ -107,7 +107,7 @@ function App() {
         tickers: opsTickers,
         eta: Number(opsEta),
         max_weight: Number(opsMaxWeight),
-        period: "1y"
+        period: "5y"
       });
       setBacktestResult(res.data);
     } catch (err) {
@@ -134,7 +134,7 @@ function App() {
     responsive: true,
     plugins: {
       legend: { position: 'top' },
-      title: { display: true, text: 'So sánh Hiệu suất Đầu tư (1 Năm qua)' },
+      title: { display: true, text: 'So sánh Hiệu suất Đầu tư (5 Năm qua)' },
     },
     scales: {
       x: { ticks: { maxTicksLimit: 10 } }

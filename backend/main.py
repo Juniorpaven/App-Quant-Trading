@@ -246,7 +246,7 @@ class BacktestRequest(BaseModel):
     tickers: str
     eta: float = 0.05
     max_weight: float = 1.0
-    period: str = "1y" # 1 năm
+    period: str = "5y" # 5 năm
     transaction_fee: float = 0.0015 # Phí giao dịch (0.15%)
 
 # --- ENDPOINTS ---
