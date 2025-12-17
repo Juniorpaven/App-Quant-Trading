@@ -44,6 +44,8 @@ function App() {
   const [opsMaxWeight, setOpsMaxWeight] = useState(1.0);
   const [opsResult, setOpsResult] = useState(null);
   const [loadingOPS, setLoadingOPS] = useState(false);
+  const [manualWeights, setManualWeights] = useState({});
+  const [useManual, setUseManual] = useState(false);
 
   // State Backtest
   const [backtestResult, setBacktestResult] = useState(null);
@@ -63,6 +65,13 @@ function App() {
       setStatus("Error connecting to backend");
       console.error(err);
     }
+  };
+
+  const handleWeightChange = (ticker, value) => {
+    setManualWeights({
+      ...manualWeights,
+      [ticker]: parseFloat(value) / 100
+    });
   };
 
   const runNTF = async () => {
@@ -109,7 +118,8 @@ function App() {
         tickers: opsTickers,
         eta: Number(opsEta),
         max_weight: Number(opsMaxWeight),
-        period: "5y"
+        period: "5y",
+        custom_weights: useManual ? manualWeights : null
       });
       setBacktestResult(res.data);
     } catch (err) {
@@ -352,6 +362,38 @@ function App() {
               </div>
             </div>
 
+            {/* --- KHU VỰC NHẬP TỶ TRỌNG THỦ CÔNG --- */}
+            <div style={{ marginTop: "15px", padding: "10px", border: "1px dashed #555" }}>
+              <label style={{ color: "#00e5ff", cursor: "pointer", fontSize: "14px" }}>
+                <input
+                  type="checkbox"
+                  checked={useManual}
+                  onChange={(e) => setUseManual(e.target.checked)}
+                  style={{ marginRight: "8px" }}
+                />
+                👉 <b>Kích hoạt Chế độ "Lái Tay" (Manual)</b>
+              </label>
+
+              {useManual && (
+                <div style={{ marginTop: "10px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                  {opsTickers.split(',').map(t => t.trim()).filter(t => t).map(ticker => (
+                    <div key={ticker} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontSize: "13px" }}>{ticker}</span>
+                      <input
+                        type="number"
+                        placeholder="%"
+                        style={{ width: "50px", background: "#333", color: "white", border: "1px solid #555", padding: "4px", textAlign: "right" }}
+                        onChange={(e) => handleWeightChange(ticker, e.target.value)}
+                      />
+                    </div>
+                  ))}
+                  <div style={{ gridColumn: "1 / span 2", fontSize: "11px", color: "#aaa", fontStyle: "italic", marginTop: "5px" }}>
+                    *Tổng tỷ trọng nên bằng 100%
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div style={{ display: "flex", gap: "10px", marginTop: "15px" }}>
               <button onClick={runOPS} style={{ ...btnStyle, flex: 1 }} disabled={loadingOPS}>
                 {loadingOPS ? "..." : "OPTIMIZE ⚖️"}
@@ -408,56 +450,58 @@ function App() {
       </div>
 
       {/* FULL WIDTH: BACKTEST CHART */}
-      {backtestResult && (
-        <div style={{ ...cardStyle, marginTop: "20px", width: "100%", boxSizing: "border-box" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
-            <div>
-              <h3 style={{ marginTop: 0, fontSize: "18px", marginBottom: "5px" }}>Backtest Performance (5 Years)</h3>
-              <div style={{ fontSize: "12px", color: "#aaa" }}>
-                Date Range: {backtestResult.chart_data.dates[0]} — {backtestResult.chart_data.dates[backtestResult.chart_data.dates.length - 1]}
+      {
+        backtestResult && (
+          <div style={{ ...cardStyle, marginTop: "20px", width: "100%", boxSizing: "border-box" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
+              <div>
+                <h3 style={{ marginTop: 0, fontSize: "18px", marginBottom: "5px" }}>Backtest Performance (5 Years)</h3>
+                <div style={{ fontSize: "12px", color: "#aaa" }}>
+                  Date Range: {backtestResult.chart_data.dates[0]} — {backtestResult.chart_data.dates[backtestResult.chart_data.dates.length - 1]}
+                </div>
+              </div>
+
+              <button
+                onClick={resetZoom}
+                style={{ ...btnStyle, width: "auto", padding: "5px 15px", fontSize: "12px", backgroundColor: "#555" }}
+              >
+                🔄 Reset Zoom
+              </button>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginBottom: "20px" }}>
+              <div style={{ padding: "15px", background: "rgba(0, 230, 118, 0.1)", borderRadius: "8px", border: "1px solid #00e676" }}>
+                <div style={{ color: "#00e676", fontSize: "14px", fontWeight: "bold" }}>OPS Strategy</div>
+                <div style={{ fontSize: "24px", fontWeight: "bold" }}>{backtestResult.metrics.strategy.total_return}%</div>
+                <div style={{ fontSize: "13px", color: "#ddd" }}>Sharpe: {backtestResult.metrics.strategy.sharpe_ratio}</div>
+                <div style={{ fontSize: "13px", color: "#ddd" }}>Max DD: <span style={{ color: "#ff5252" }}>{backtestResult.metrics.strategy.max_drawdown}%</span></div>
+              </div>
+              <div style={{ padding: "15px", background: "rgba(255, 23, 68, 0.1)", borderRadius: "8px", border: "1px solid #ff1744" }}>
+                <div style={{ color: "#ff1744", fontSize: "14px", fontWeight: "bold" }}>Benchmark</div>
+                <div style={{ fontSize: "24px", fontWeight: "bold" }}>{backtestResult.metrics.benchmark.total_return}%</div>
+                <div style={{ fontSize: "13px", color: "#ddd" }}>Sharpe: {backtestResult.metrics.benchmark.sharpe_ratio}</div>
+                <div style={{ fontSize: "13px", color: "#ddd" }}>Max DD: <span style={{ color: "#ff5252" }}>{backtestResult.metrics.benchmark.max_drawdown}%</span></div>
               </div>
             </div>
 
-            <button
-              onClick={resetZoom}
-              style={{ ...btnStyle, width: "auto", padding: "5px 15px", fontSize: "12px", backgroundColor: "#555" }}
-            >
-              🔄 Reset Zoom
-            </button>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginBottom: "20px" }}>
-            <div style={{ padding: "15px", background: "rgba(0, 230, 118, 0.1)", borderRadius: "8px", border: "1px solid #00e676" }}>
-              <div style={{ color: "#00e676", fontSize: "14px", fontWeight: "bold" }}>OPS Strategy</div>
-              <div style={{ fontSize: "24px", fontWeight: "bold" }}>{backtestResult.metrics.strategy.total_return}%</div>
-              <div style={{ fontSize: "13px", color: "#ddd" }}>Sharpe: {backtestResult.metrics.strategy.sharpe_ratio}</div>
-              <div style={{ fontSize: "13px", color: "#ddd" }}>Max DD: <span style={{ color: "#ff5252" }}>{backtestResult.metrics.strategy.max_drawdown}%</span></div>
-            </div>
-            <div style={{ padding: "15px", background: "rgba(255, 23, 68, 0.1)", borderRadius: "8px", border: "1px solid #ff1744" }}>
-              <div style={{ color: "#ff1744", fontSize: "14px", fontWeight: "bold" }}>Benchmark</div>
-              <div style={{ fontSize: "24px", fontWeight: "bold" }}>{backtestResult.metrics.benchmark.total_return}%</div>
-              <div style={{ fontSize: "13px", color: "#ddd" }}>Sharpe: {backtestResult.metrics.benchmark.sharpe_ratio}</div>
-              <div style={{ fontSize: "13px", color: "#ddd" }}>Max DD: <span style={{ color: "#ff5252" }}>{backtestResult.metrics.benchmark.max_drawdown}%</span></div>
+            <div style={{ height: "400px", width: "100%" }}>
+              <Line
+                ref={chartRef}
+                options={{
+                  ...chartOptions,
+                  maintainAspectRatio: false,
+                  plugins: {
+                    ...chartOptions.plugins,
+                    legend: { display: false }
+                  }
+                }}
+                data={chartData}
+              />
             </div>
           </div>
-
-          <div style={{ height: "400px", width: "100%" }}>
-            <Line
-              ref={chartRef}
-              options={{
-                ...chartOptions,
-                maintainAspectRatio: false,
-                plugins: {
-                  ...chartOptions.plugins,
-                  legend: { display: false }
-                }
-              }}
-              data={chartData}
-            />
-          </div>
-        </div>
-      )}
-    </div>
+        )
+      }
+    </div >
   )
 }
 

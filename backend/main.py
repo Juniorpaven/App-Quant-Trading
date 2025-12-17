@@ -252,6 +252,7 @@ class BacktestRequest(BaseModel):
     max_weight: float = 1.0
     period: str = "5y" # 5 năm
     transaction_fee: float = 0.0015 # Phí giao dịch (0.15%)
+    custom_weights: dict[str, float] = None # Nhận tỷ trọng thủ công
 
 # --- ENDPOINTS ---
 
@@ -331,8 +332,62 @@ def backtest_endpoint(req: BacktestRequest):
         # Lấy dữ liệu lịch sử dài hạn
         data = get_data(ticker_list, period=req.period)
         
-        # Chạy giả lập
-        sim_result = run_backtest_simulation(data, req.eta, req.max_weight, req.transaction_fee)
+        mode_message = ""
+        
+        # --- LOGIC MỚI: CHỌN CHẾ ĐỘ ---
+        if req.custom_weights and sum(req.custom_weights.values()) > 0:
+            # CHẾ ĐỘ THỦ CÔNG (Manual Allocation - Constant Mix)
+            mode_message = "Thủ công (Manual Allocation)"
+            
+            # Filter custom weights to match available data columns
+            valid_weights = {k: v for k, v in req.custom_weights.items() if k in data.columns}
+            if not valid_weights:
+                 raise HTTPException(status_code=400, detail="Không tìm thấy mã nào trong dữ liệu khớp với tỷ trọng nhập vào.")
+            
+            # Normalize weights to sum to 1
+            total_w = sum(valid_weights.values())
+            weights_map = {k: v / total_w for k, v in valid_weights.items()}
+            
+            # Simulation for Constant Mix
+            returns = data.pct_change().dropna()
+            dates = returns.index.strftime('%Y-%m-%d').tolist()
+            returns_np = returns.values
+            T, N = returns_np.shape
+            
+            # Map weights to column order
+            w_vector = np.array([weights_map.get(col, 0.0) for col in data.columns])
+            
+            # Sim
+            portfolio_wealth = [1.0]
+            benchmark_wealth = [1.0] # Equal weight benchmark
+            
+            # Pre-calculate benchmark equal weights
+            bench_weights = np.ones(N) / N
+            
+            for t in range(T):
+                # Strategy Return (Constant Mix: rebalance every day to w_vector)
+                # Cost is ignored in this simple manual view or we can apply it. 
+                # User snippet didn't emphasize cost for manual, but let's keep it fair? 
+                # User snippet: strategy_ret = (weights_df.shift(1) * data.pct_change()).sum(axis=1) NO COST.
+                # Let's simple dot product
+                
+                day_ret = np.dot(w_vector, returns_np[t])
+                portfolio_wealth.append(portfolio_wealth[-1] * (1 + day_ret))
+                
+                # Benchmark Return
+                bench_ret = np.dot(bench_weights, returns_np[t])
+                benchmark_wealth.append(benchmark_wealth[-1] * (1 + bench_ret))
+            
+            sim_result = {
+                "dates": dates,
+                "strategy": portfolio_wealth[1:],
+                "benchmark": benchmark_wealth[1:]
+            }
+            
+        else:
+            # CHẾ ĐỘ TỰ ĐỘNG (OPS AI)
+            mode_message = "Tự động (AI OPS)"
+            sim_result = run_backtest_simulation(data, req.eta, req.max_weight, req.transaction_fee)
         
         # Tính chỉ số
         stats_strat = calculate_metrics(sim_result["strategy"])
@@ -344,7 +399,8 @@ def backtest_endpoint(req: BacktestRequest):
             "metrics": {
                 "strategy": stats_strat,
                 "benchmark": stats_bench
-            }
+            },
+            "mode": mode_message
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
