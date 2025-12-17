@@ -2,6 +2,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import Optional, Dict
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -252,7 +253,7 @@ class BacktestRequest(BaseModel):
     max_weight: float = 1.0
     period: str = "5y" # 5 năm
     transaction_fee: float = 0.0015 # Phí giao dịch (0.15%)
-    custom_weights: dict[str, float] = None # Nhận tỷ trọng thủ công
+    custom_weights: Optional[Dict[str, float]] = None # Nhận tỷ trọng thủ công
 
 # --- ENDPOINTS ---
 
