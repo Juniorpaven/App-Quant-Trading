@@ -1,5 +1,5 @@
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import axios from 'axios'
 import {
   Chart as ChartJS,
@@ -180,6 +180,15 @@ function App() {
       },
     ],
   } : null;
+
+  // Ref for chart
+  const chartRef = useRef(null);
+
+  const resetZoom = () => {
+    if (chartRef.current) {
+      chartRef.current.resetZoom();
+    }
+  };
 
   return (
     <div style={{ padding: "10px 20px", fontFamily: "Arial, sans-serif", maxWidth: "100%", margin: "0 auto", backgroundColor: "#1e1e1e", color: "#e0e0e0", minHeight: "100vh", boxSizing: "border-box" }}>
@@ -395,43 +404,59 @@ function App() {
             </div>
           )}
 
-          {/* BACKTEST CHART */}
-          {backtestResult && (
-            <div style={cardStyle}>
-              <h3 style={{ marginTop: 0, fontSize: "16px" }}>Backtest Performance</h3>
-              <div style={{ fontSize: "12px", color: "#aaa", marginBottom: "10px" }}>
-                Date Range: {backtestResult.chart_data.dates[0]} — {backtestResult.chart_data.dates[backtestResult.chart_data.dates.length - 1]}
-              </div>
-
-              {/* Metrics Grid */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "15px" }}>
-                <div style={{ padding: "8px", background: "rgba(0, 230, 118, 0.1)", borderRadius: "5px", border: "1px solid #00e676" }}>
-                  <div style={{ color: "#00e676", fontSize: "12px", fontWeight: "bold" }}>OPS Strategy</div>
-                  <div style={{ fontSize: "16px", fontWeight: "bold" }}>{backtestResult.metrics.strategy.total_return}%</div>
-                  <div style={{ fontSize: "11px", color: "#aaa" }}>Sharpe: {backtestResult.metrics.strategy.sharpe_ratio}</div>
-                </div>
-                <div style={{ padding: "8px", background: "rgba(255, 23, 68, 0.1)", borderRadius: "5px", border: "1px solid #ff1744" }}>
-                  <div style={{ color: "#ff1744", fontSize: "12px", fontWeight: "bold" }}>Benchmark</div>
-                  <div style={{ fontSize: "16px", fontWeight: "bold" }}>{backtestResult.metrics.benchmark.total_return}%</div>
-                  <div style={{ fontSize: "11px", color: "#aaa" }}>Sharpe: {backtestResult.metrics.benchmark.sharpe_ratio}</div>
-                </div>
-              </div>
-
-              <div style={{ height: "200px" }}>
-                <Line options={{ ...chartOptions, plugins: { ...chartOptions.plugins, legend: { display: false } } }} data={chartData} />
-              </div>
-            </div>
-          )}
-
-          {!opsResult && !backtestResult && (
-            <div style={{ ...cardStyle, textAlign: "center", color: "#555", padding: "40px" }}>
-              <div style={{ fontSize: "40px", marginBottom: "10px" }}>📊</div>
-              <div>Results will appear here</div>
-            </div>
-          )}
-
         </div>
       </div>
+
+      {/* FULL WIDTH: BACKTEST CHART */}
+      {backtestResult && (
+        <div style={{ ...cardStyle, marginTop: "20px", width: "100%", boxSizing: "border-box" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
+            <div>
+              <h3 style={{ marginTop: 0, fontSize: "18px", marginBottom: "5px" }}>Backtest Performance (5 Years)</h3>
+              <div style={{ fontSize: "12px", color: "#aaa" }}>
+                Date Range: {backtestResult.chart_data.dates[0]} — {backtestResult.chart_data.dates[backtestResult.chart_data.dates.length - 1]}
+              </div>
+            </div>
+
+            <button
+              onClick={resetZoom}
+              style={{ ...btnStyle, width: "auto", padding: "5px 15px", fontSize: "12px", backgroundColor: "#555" }}
+            >
+              🔄 Reset Zoom
+            </button>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginBottom: "20px" }}>
+            <div style={{ padding: "15px", background: "rgba(0, 230, 118, 0.1)", borderRadius: "8px", border: "1px solid #00e676" }}>
+              <div style={{ color: "#00e676", fontSize: "14px", fontWeight: "bold" }}>OPS Strategy</div>
+              <div style={{ fontSize: "24px", fontWeight: "bold" }}>{backtestResult.metrics.strategy.total_return}%</div>
+              <div style={{ fontSize: "13px", color: "#ddd" }}>Sharpe: {backtestResult.metrics.strategy.sharpe_ratio}</div>
+              <div style={{ fontSize: "13px", color: "#ddd" }}>Max DD: <span style={{ color: "#ff5252" }}>{backtestResult.metrics.strategy.max_drawdown}%</span></div>
+            </div>
+            <div style={{ padding: "15px", background: "rgba(255, 23, 68, 0.1)", borderRadius: "8px", border: "1px solid #ff1744" }}>
+              <div style={{ color: "#ff1744", fontSize: "14px", fontWeight: "bold" }}>Benchmark</div>
+              <div style={{ fontSize: "24px", fontWeight: "bold" }}>{backtestResult.metrics.benchmark.total_return}%</div>
+              <div style={{ fontSize: "13px", color: "#ddd" }}>Sharpe: {backtestResult.metrics.benchmark.sharpe_ratio}</div>
+              <div style={{ fontSize: "13px", color: "#ddd" }}>Max DD: <span style={{ color: "#ff5252" }}>{backtestResult.metrics.benchmark.max_drawdown}%</span></div>
+            </div>
+          </div>
+
+          <div style={{ height: "400px", width: "100%" }}>
+            <Line
+              ref={chartRef}
+              options={{
+                ...chartOptions,
+                maintainAspectRatio: false,
+                plugins: {
+                  ...chartOptions.plugins,
+                  legend: { display: false }
+                }
+              }}
+              data={chartData}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
