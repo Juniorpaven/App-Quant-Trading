@@ -119,7 +119,7 @@ function App() {
         eta: Number(opsEta),
         max_weight: Number(opsMaxWeight),
         period: "5y",
-        custom_weights: useManual ? manualWeights : null
+        custom_weights: useManual ? manualWeights : {}
       });
       setBacktestResult(res.data);
       if (res.data.final_weights) {
