@@ -122,9 +122,14 @@ function App() {
         custom_weights: useManual ? manualWeights : null
       });
       setBacktestResult(res.data);
+      if (res.data.final_weights) {
+        setOpsResult(res.data.final_weights);
+      }
     } catch (err) {
       console.error(err);
-      const errorMsg = err.response?.data?.detail || "Lỗi Backtest!";
+      const errorMsg = typeof err.response?.data?.detail === "object"
+        ? JSON.stringify(err.response?.data?.detail)
+        : (err.response?.data?.detail || "Lỗi Backtest!");
       alert(`Backtest Error: ${errorMsg}`);
     }
     setLoadingBacktest(false);

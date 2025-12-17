@@ -400,7 +400,8 @@ def backtest_endpoint(req: BacktestRequest):
                 "strategy": stats_strat,
                 "benchmark": stats_bench
             },
-            "mode": mode_message
+            "mode": mode_message,
+            "final_weights": valid_weights if mode_message == "Thủ công (Manual Allocation)" else None
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
