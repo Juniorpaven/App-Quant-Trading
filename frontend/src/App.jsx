@@ -382,6 +382,9 @@ function App() {
           {backtestResult && (
             <div style={cardStyle}>
               <h3 style={{ marginTop: 0, fontSize: "16px" }}>Backtest Performance</h3>
+              <div style={{ fontSize: "12px", color: "#aaa", marginBottom: "10px" }}>
+                Date Range: {backtestResult.chart_data.dates[0]} — {backtestResult.chart_data.dates[backtestResult.chart_data.dates.length - 1]}
+              </div>
 
               {/* Metrics Grid */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "15px" }}>

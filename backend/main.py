@@ -24,16 +24,18 @@ app.add_middleware(
 )
 
 # --- CACHING & DATA UTILS ---
-DATA_CACHE = {}
+# --- CACHING & DATA UTILS ---
+DATA_CACHE_V2 = {}
 
 def get_data(tickers, period="5y"): # Lấy 5 năm để OPS học tốt hơn
     tickers = [t.strip().upper() for t in tickers]
     key = (tuple(sorted(tickers)), period)
     
-    if key in DATA_CACHE and (datetime.now() - DATA_CACHE[key][0] < timedelta(hours=4)):
-        return DATA_CACHE[key][1]
+    if key in DATA_CACHE_V2 and (datetime.now() - DATA_CACHE_V2[key][0] < timedelta(hours=4)):
+        print(f"Using Cached Data for {key}")
+        return DATA_CACHE_V2[key][1]
         
-    print(f"Fetching: {tickers}")
+    print(f"Fetching: {tickers} | Period: {period}")
     data = yf.download(tickers, period=period, progress=False, auto_adjust=False)['Adj Close']
     
     # Nếu chỉ có 1 ticker, yfinance trả về Series, cần convert sang DataFrame
@@ -53,7 +55,7 @@ def get_data(tickers, period="5y"): # Lấy 5 năm để OPS học tốt hơn
     # Tốt nhất là forward fill trước khi dropna
     data = data.ffill().dropna()
     
-    DATA_CACHE[key] = (datetime.now(), data)
+    DATA_CACHE_V2[key] = (datetime.now(), data)
     return data
 
 # --- ALGORITHMS ---
