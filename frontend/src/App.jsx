@@ -12,6 +12,7 @@ import {
   Legend,
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
+import zoomPlugin from 'chartjs-plugin-zoom';
 
 ChartJS.register(
   CategoryScale,
@@ -20,7 +21,8 @@ ChartJS.register(
   LineElement,
   Title,
   Tooltip,
-  Legend
+  Legend,
+  zoomPlugin
 );
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -135,6 +137,21 @@ function App() {
     plugins: {
       legend: { position: 'top' },
       title: { display: true, text: 'So sánh Hiệu suất Đầu tư (5 Năm qua)' },
+      zoom: {
+        pan: {
+          enabled: true,
+          mode: 'x', // Cho phép kéo qua lại theo trục X
+        },
+        zoom: {
+          wheel: {
+            enabled: true, // Cho phép lăn chuột để zoom
+          },
+          pinch: {
+            enabled: true
+          },
+          mode: 'x', // Chỉ zoom theo trục X
+        }
+      }
     },
     scales: {
       x: { ticks: { maxTicksLimit: 10 } }

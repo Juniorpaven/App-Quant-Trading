@@ -111,6 +111,8 @@ def calculate_ops_eg(data, eta=0.05):
         # Chuẩn hóa lại để tổng weights = 1 (Simplex projection)
         weights /= np.sum(weights)
         
+
+        
     # Gán nhãn Ticker cho kết quả cuối cùng
     # Convert numpy types to native float for JSON serialization safety
     final_weights = [float(w) if not np.isnan(w) else 0.0 for w in weights]
