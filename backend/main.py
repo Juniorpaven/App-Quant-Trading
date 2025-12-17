@@ -26,9 +26,9 @@ app.add_middleware(
 # --- CACHING & DATA UTILS ---
 DATA_CACHE = {}
 
-def get_data(tickers, period="1y"): # Lấy 1 năm để OPS học tốt hơn
+def get_data(tickers, period="5y"): # Lấy 5 năm để OPS học tốt hơn
     tickers = [t.strip().upper() for t in tickers]
-    key = tuple(sorted(tickers))
+    key = (tuple(sorted(tickers)), period)
     
     if key in DATA_CACHE and (datetime.now() - DATA_CACHE[key][0] < timedelta(hours=4)):
         return DATA_CACHE[key][1]
@@ -282,7 +282,7 @@ def run_ops_endpoint(req: OPSRequest):
         except ValueError:
              raise HTTPException(status_code=400, detail="Lookbacks phải là danh sách số nguyên, ví dụ: '20, 60, 120'")
         
-        data = get_data(ticker_list) # Mặc định lấy 1y data
+        data = get_data(ticker_list) # Mặc định lấy 5y data
         
         # Khởi tạo dict chứa tổng weights
         final_weights = {ticker: 0.0 for ticker in data.columns}
