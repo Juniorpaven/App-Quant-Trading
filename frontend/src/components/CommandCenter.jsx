@@ -32,7 +32,7 @@ const CommandCenter = () => {
     };
 
     const checkFundamentals = async () => {
-        if(!fundTicker) return;
+        if (!fundTicker) return;
         setLoadingFund(true);
         try {
             const res = await axios.post(`${API_URL}/api/dashboard/fundamentals`, { ticker: fundTicker });
@@ -84,21 +84,21 @@ const CommandCenter = () => {
 
             {/* ROW 1: SENTIMENT & TOP MOVERS */}
             <div style={{ display: "flex", flexWrap: "wrap", gap: "20px", marginBottom: "30px" }}>
-                
+
                 {/* MARKET GAUGE */}
                 <div style={{ ...cardStyle, flex: 1 }}>
                     <h3 style={sectionTitle}>Market Pulse (VN30)</h3>
                     {sentiment ? (
                         <div style={{ position: 'relative', height: "200px" }}>
-                            <Plot 
+                            <Plot
                                 data={[{
                                     domain: { x: [0, 1], y: [0, 1] },
-                                    value: sentiment.market_score + 0.5, # Offset simple
+                                    value: sentiment.market_score + 0.5, // Offset simple
                                     title: { text: sentiment.market_status, font: { size: 16, color: sentiment.market_color } },
                                     type: "indicator",
                                     mode: "gauge+number",
                                     gauge: {
-                                        axis: { range: [-1, 1] }, # NTF Score range approx -1 to 1
+                                        axis: { range: [-1, 1] }, // NTF Score range approx -1 to 1
                                         bar: { color: sentiment.market_color },
                                         steps: [
                                             { range: [-1, -0.1], color: "rgba(255, 23, 68, 0.3)" },
@@ -112,16 +112,16 @@ const CommandCenter = () => {
                                         }
                                     }
                                 }]}
-                                layout={{ 
-                                    width: 300, 
-                                    height: 200, 
+                                layout={{
+                                    width: 300,
+                                    height: 200,
                                     margin: { t: 0, b: 0, l: 30, r: 30 },
                                     paper_bgcolor: "rgba(0,0,0,0)",
                                     font: { color: "white" }
                                 }}
                                 config={{ displayModeBar: false }}
                             />
-                            <div style={{textAlign: 'center', marginTop: '-50px', fontSize: '2em', fontWeight: 'bold', color: sentiment.market_color}}>
+                            <div style={{ textAlign: 'center', marginTop: '-50px', fontSize: '2em', fontWeight: 'bold', color: sentiment.market_color }}>
                                 {sentiment.market_score}
                             </div>
                         </div>
@@ -133,8 +133,8 @@ const CommandCenter = () => {
                     <h3 style={sectionTitle}>🔥 Top Leaders (Sector Flow)</h3>
                     <div style={{ display: "flex", gap: "15px", flexWrap: "wrap" }}>
                         {sentiment && sentiment.top_movers.map((item, idx) => (
-                            <div key={idx} style={{ 
-                                ...cardStyle, 
+                            <div key={idx} style={{
+                                ...cardStyle,
                                 borderLeft: `5px solid ${item.score > 0.3 ? '#00e676' : '#ffd700'}`,
                                 display: "flex", flexDirection: "column", justifyContent: "center"
                             }}>
@@ -155,16 +155,16 @@ const CommandCenter = () => {
 
             {/* ROW 2: RRG & FUNDAMENTALS */}
             <div style={{ display: "flex", flexWrap: "wrap", gap: "20px" }}>
-                
+
                 {/* RRG CHART */}
                 <div style={{ ...cardStyle, flex: 2, minHeight: "500px" }}>
-                    <h3 style={{...sectionTitle, display: 'flex', justifyContent: 'space-between'}}>
+                    <h3 style={{ ...sectionTitle, display: 'flex', justifyContent: 'space-between' }}>
                         <span>🔄 Relative Rotation Graph (RRG)</span>
-                        <span style={{fontSize: '12px', color: '#666'}}>*Benchmark: VN-Index</span>
+                        <span style={{ fontSize: '12px', color: '#666' }}>*Benchmark: VN-Index</span>
                     </h3>
-                    
+
                     {rrgData.length > 0 ? (
-                         <Plot
+                        <Plot
                             data={[
                                 {
                                     x: rrgData.map(d => d.x),
@@ -183,39 +183,39 @@ const CommandCenter = () => {
                             layout={{
                                 autosize: true,
                                 height: 450,
-                                margin: {l: 50, r: 50, b: 50, t: 20},
+                                margin: { l: 50, r: 50, b: 50, t: 20 },
                                 paper_bgcolor: "rgba(0,0,0,0)",
                                 plot_bgcolor: "rgba(255,255,255,0.05)",
                                 font: { color: "#e0e0e0" },
-                                xaxis: { 
-                                    title: "Relative Strength (RS-Ratio)", 
-                                    gridcolor: "#333", 
+                                xaxis: {
+                                    title: "Relative Strength (RS-Ratio)",
+                                    gridcolor: "#333",
                                     zerolinecolor: "#666",
-                                    range: [80, 120] # Auto-range better usually but lets center 100
+                                    range: [80, 120] // Auto-range better usually but lets center 100
                                 },
-                                yaxis: { 
-                                    title: "Momentum (RS-Momentum)", 
-                                    gridcolor: "#333", 
+                                yaxis: {
+                                    title: "Momentum (RS-Momentum)",
+                                    gridcolor: "#333",
                                     zerolinecolor: "#666",
                                     range: [90, 110]
                                 },
                                 shapes: [
-                                    # Quadrant Lines
-                                    { type: 'line', x0: 100, x1: 100, y0: 0, y1: 200, line: { color: 'gray', dash: 'dot'} },
-                                    { type: 'line', x0: 0, x1: 200, y0: 100, y1: 100, line: { color: 'gray', dash: 'dot'} }
+                                    // Quadrant Lines
+                                    { type: 'line', x0: 100, x1: 100, y0: 0, y1: 200, line: { color: 'gray', dash: 'dot' } },
+                                    { type: 'line', x0: 0, x1: 200, y0: 100, y1: 100, line: { color: 'gray', dash: 'dot' } }
                                 ],
                                 annotations: [
-                                    { x: 110, y: 105, text: "LEADING (Dẫn dắt) 🟢", showarrow: false, font: {color: "#00e676", size: 14, weight: "bold"} },
-                                    { x: 90, y: 105, text: "IMPROVING (Cải thiện) 🔵", showarrow: false, font: {color: "#2979ff"} },
-                                    { x: 90, y: 95, text: "LAGGING (Tụt hậu) 🔴", showarrow: false, font: {color: "#ff1744"} },
-                                    { x: 110, y: 95, text: "WEAKENING (Suy yếu) 🟡", showarrow: false, font: {color: "#ffea00"} }
+                                    { x: 110, y: 105, text: "LEADING (Dẫn dắt) 🟢", showarrow: false, font: { color: "#00e676", size: 14, weight: "bold" } },
+                                    { x: 90, y: 105, text: "IMPROVING (Cải thiện) 🔵", showarrow: false, font: { color: "#2979ff" } },
+                                    { x: 90, y: 95, text: "LAGGING (Tụt hậu) 🔴", showarrow: false, font: { color: "#ff1744" } },
+                                    { x: 110, y: 95, text: "WEAKENING (Suy yếu) 🟡", showarrow: false, font: { color: "#ffea00" } }
                                 ]
                             }}
                             config={{ responsive: true, displayModeBar: false }}
                             style={{ width: "100%", height: "100%" }}
                         />
                     ) : (
-                        <div style={{padding: "50px", color: "#666"}}>Loading RRG Data (Fetching 1 Year History)...</div>
+                        <div style={{ padding: "50px", color: "#666" }}>Loading RRG Data (Fetching 1 Year History)...</div>
                     )}
                 </div>
 
@@ -223,13 +223,13 @@ const CommandCenter = () => {
                 <div style={{ ...cardStyle, flex: 1 }}>
                     <h3 style={sectionTitle}>📊 Fundamental Snapshot</h3>
                     <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
-                        <input 
+                        <input
                             value={fundTicker}
                             onChange={(e) => setFundTicker(e.target.value)}
                             placeholder="Ticker (e.g. HPG)"
                             style={{ flex: 1, padding: "10px", borderRadius: "4px", border: "1px solid #555", backgroundColor: "#333", color: "white" }}
                         />
-                        <button 
+                        <button
                             onClick={checkFundamentals}
                             style={{ padding: "10px 20px", backgroundColor: "#00e5ff", border: "none", borderRadius: "4px", color: "black", fontWeight: "bold", cursor: "pointer" }}
                             disabled={loadingFund}
@@ -260,7 +260,7 @@ const CommandCenter = () => {
                             {/* WARNING BOX */}
                             {(fundData.pe > 20 || fundData.roe < 10) && (
                                 <div style={{ marginTop: "10px", padding: "10px", backgroundColor: "rgba(255, 23, 68, 0.1)", border: "1px solid #ff1744", color: "#ff1744", fontSize: "13px" }}>
-                                    ⚠️ Warning: 
+                                    ⚠️ Warning:
                                     {fundData.pe > 20 && " High Valuation (P/E > 20)."}
                                     {fundData.roe < 10 && " Low Efficiency (ROE < 10%)."}
                                 </div>
@@ -270,7 +270,7 @@ const CommandCenter = () => {
                                     ✅ Fundamentals Good
                                 </div>
                             )}
-                            <div style={{fontSize: '10px', color: '#666', marginTop: '5px'}}>Source: {fundData.source}</div>
+                            <div style={{ fontSize: '10px', color: '#666', marginTop: '5px' }}>Source: {fundData.source}</div>
                         </div>
                     )}
                 </div>
