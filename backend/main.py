@@ -375,7 +375,10 @@ def get_data_vnstock_hist(tickers, period="1y"):
     
     def fetch_one(t):
         try:
+            # MAP ^VNINDEX to VNINDEX for vnstock
             clean = t.replace(".VN", "").strip()
+            if clean == "^VNINDEX": clean = "VNINDEX"
+            
             stock = Vnstock().stock(symbol=clean, source='VCI')
             df = stock.quote.history(symbol=clean, start=start_date, end=end_date)
             # Standardize
@@ -385,7 +388,7 @@ def get_data_vnstock_hist(tickers, period="1y"):
                 df = df.set_index('time')
                 df.index = pd.to_datetime(df.index)
                 series = df['close'] 
-                # Rename series to ticker
+                # Rename series to ORIGINAL ticker requested (to match dict keys)
                 series.name = t
                 return t, series
         except Exception as e:
@@ -407,7 +410,8 @@ def get_data_vnstock_hist(tickers, period="1y"):
 def get_data(tickers, period="5y"): 
     # Logic: Prefer Vnstock for Vietnam stocks (.VN or no suffix), yfinance for Crypto/US
     
-    vn_tickers = [t for t in tickers if ".VN" in t or (len(t) <= 3 and "-" not in t)]
+    # TREAT ^VNINDEX as a VN ticker
+    vn_tickers = [t for t in tickers if ".VN" in t or t == "^VNINDEX" or (len(t) <= 3 and "-" not in t)]
     us_tickers = [t for t in tickers if t not in vn_tickers]
     
     df_vn = pd.DataFrame()
