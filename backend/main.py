@@ -301,9 +301,17 @@ def get_vnstock_fundamentals(ticker):
 def calculate_rrg_data(tickers, benchmark="^VNINDEX"): # Sử dụng VNINDEX làm bench
     # 1. Fetch Data (Price History)
     all_tickers = tickers + [benchmark]
-    # Download 1 year data
-    data = yf.download(all_tickers, period="1y", progress=False)['Adj Close']
-    
+    # Use cached get_data instead of direct yf.download
+    # This caches results for 4 hours, making subsequent RRG loads instant
+    try:
+        data = get_data(all_tickers, period="1y")
+    except Exception as e:
+        print(f"RRG Data Fetch Error: {e}")
+        return []
+
+    if data is None or data.empty:
+        return []
+
     # Fix MultiIndex if any
     if isinstance(data.columns, pd.MultiIndex):
         data.columns = data.columns.get_level_values(0)
