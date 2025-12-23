@@ -4,16 +4,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict
 import yfinance as yf
-import pandas as pd
-import numpy as np
 from datetime import datetime, timedelta
-# VNSTOCK IMPORT (Try/Except to avoid crash if not installed)
-try:
-    from vnstock import Finance
-    VNSTOCK_AVAILABLE = True
-except ImportError:
-    VNSTOCK_AVAILABLE = False
-    print("Warning: vnstock not available (Fundamentals will be empty)")
+
+# Removed top-level vnstock import to prevent startup timeout
+# vnstock will be imported lazily in get_vnstock_fundamentals
 
 app = FastAPI()
 
@@ -267,7 +261,15 @@ VN30_LIST = ["ACB.VN", "BCM.VN", "BID.VN", "BVH.VN", "CTG.VN", "FPT.VN", "GAS.VN
 
 def get_vnstock_fundamentals(ticker):
     """Lấy chỉ số cơ bản từ VNStock (P/E, ROE...)"""
-    if not VNSTOCK_AVAILABLE:
+    # LAZY IMPORT VNSTOCK (To avoid slow startup on Render)
+    try:
+        from vnstock import Finance
+        vnstock_available = True
+    except ImportError:
+        vnstock_available = False
+        print("Warning: vnstock not installed")
+
+    if not vnstock_available:
         return {"pe": 0, "roe": 0, "eps": 0, "pb": 0, "source": "N/A"}
     
     clean_ticker = ticker.replace(".VN", "").strip()
@@ -282,11 +284,6 @@ def get_vnstock_fundamentals(ticker):
              
         # Lấy dòng mới nhất (Quý gần nhất)
         latest = df_ratio.iloc[0] # Giả sử sort desc? Cần check sort
-        # VNStock thường trả về thời gian giảm dần (mới nhất ở trên)
-        
-        # Mapping tên cột (Cần debug tên cột thực tế nếu lỗi)
-        # Giả định tên cột chuẩn: 'priceToEarning', 'roe', 'earningPerShare', 'priceToBook'
-        # Hoặc dùng get để an toàn
         
         return {
             "pe": round(latest.get('priceToEarning', 0), 2),
