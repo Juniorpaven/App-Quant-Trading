@@ -282,6 +282,40 @@ const CommandCenter = () => {
                                 </div>
                             )}
                             <div style={{ fontSize: '10px', color: '#666', marginTop: '5px' }}>Source: {fundData.source}</div>
+
+                            {/* COPY PROMPT BUTTON */}
+                            <button
+                                onClick={() => {
+                                    if (!fundData) return;
+                                    const tickerSimple = fundTicker.replace(".VN", "").toUpperCase();
+                                    const rrgItem = rrgData.find(item => item.ticker === tickerSimple);
+                                    // Extract simple status e.g. "LEADING" from "Leading (Dẫn dắt) 🟢"
+                                    const rrgStatus = rrgItem ? rrgItem.quadrant.split('(')[0].trim().toUpperCase() : "N/A";
+                                    const marketStatus = sentiment ? sentiment.market_status : "N/A";
+
+                                    const prompt = `Phân tích Quant mã ${tickerSimple}: RRG ${rrgStatus}, P/E ${fundData.pe}, ROE ${fundData.roe}%, Market Pulse ${marketStatus}.`;
+
+                                    navigator.clipboard.writeText(prompt);
+                                    alert("📋 Đã copy Prompt cho AI:\n" + prompt);
+                                }}
+                                style={{
+                                    marginTop: "15px",
+                                    padding: "8px",
+                                    width: "100%",
+                                    backgroundColor: "#e91e63",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "4px",
+                                    cursor: "pointer",
+                                    fontWeight: "bold",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    gap: "5px"
+                                }}
+                            >
+                                🤖 Copy Prompt to AI
+                            </button>
                         </div>
                     )}
                 </div>
