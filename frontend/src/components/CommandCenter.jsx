@@ -92,16 +92,21 @@ const CommandCenter = () => {
                     <h3 style={sectionTitle}>Market Pulse (VN30)</h3>
                     {sentiment ? (
                         <div style={{ position: 'relative', height: "200px" }}>
+                            {/* STATUS TEXT (Moved outside Plotly title to avoid overlap) */}
+                            <div style={{ textAlign: 'center', marginBottom: '-10px', fontSize: '18px', fontWeight: 'bold', color: sentiment.market_color }}>
+                                {sentiment.market_status}
+                            </div>
+
                             <Suspense fallback={<div>Loading Chart...</div>}>
                                 <Plot
                                     data={[{
                                         domain: { x: [0, 1], y: [0, 1] },
                                         value: sentiment.market_score + 0.5, // Offset simple
-                                        title: { text: sentiment.market_status, font: { size: 16, color: sentiment.market_color } },
+                                        // Remove title from here to prevent overlap
                                         type: "indicator",
-                                        mode: "gauge+number",
+                                        mode: "gauge", // Removed "+number" to hide the offset value
                                         gauge: {
-                                            axis: { range: [-1, 1] }, // NTF Score range approx -1 to 1
+                                            axis: { range: [-1, 1], visible: false }, // Hide axis numbers if needed, or keep for context
                                             bar: { color: sentiment.market_color },
                                             steps: [
                                                 { range: [-1, -0.1], color: "rgba(255, 23, 68, 0.3)" },
@@ -117,15 +122,15 @@ const CommandCenter = () => {
                                     }]}
                                     layout={{
                                         width: 300,
-                                        height: 200,
-                                        margin: { t: 0, b: 0, l: 30, r: 30 },
+                                        height: 180, // Reduced height slightly
+                                        margin: { t: 20, b: 0, l: 30, r: 30 }, // Added top margin
                                         paper_bgcolor: "rgba(0,0,0,0)",
                                         font: { color: "white" }
                                     }}
                                     config={{ displayModeBar: false }}
                                 />
                             </Suspense>
-                            <div style={{ textAlign: 'center', marginTop: '-50px', fontSize: '2em', fontWeight: 'bold', color: sentiment.market_color }}>
+                            <div style={{ textAlign: 'center', marginTop: '-40px', fontSize: '2.5em', fontWeight: 'bold', color: sentiment.market_color }}>
                                 {sentiment.market_score}
                             </div>
                         </div>
