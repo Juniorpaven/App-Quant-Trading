@@ -355,84 +355,52 @@ def get_vnstock_fundamentals(ticker):
         print(f"VNStock Error for {ticker}: {e}")
         return {"pe": 0, "roe": 0, "eps": 0, "pb": 0, "source": "Error"}
 
-def get_data_vnstock_hist(tickers, period="1y"):
-    """Fetch historical data for multiple tickers using vnstock"""
-    from vnstock import Vnstock
-    import pandas as pd
-    from concurrent.futures import ThreadPoolExecutor
-    
-    # Calculate start date
-    days = 365
-    if period == "6mo": days = 180
-    elif period == "3mo": days = 90
-    elif period == "2y": days = 365*2
-    elif period == "5y": days = 365*5
-    
-    end_date = datetime.now().strftime('%Y-%m-%d')
-    start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
-    
-    result_dict = {}
-    
-    def fetch_one(t):
-        try:
-            # MAP ^VNINDEX to VNINDEX for vnstock
-            clean = t.replace(".VN", "").strip()
-            if clean == "^VNINDEX": clean = "VNINDEX"
-            
-            stock = Vnstock().stock(symbol=clean, source='VCI')
-            df = stock.quote.history(symbol=clean, start=start_date, end=end_date)
-            # Standardize
-            # vnstock returns: time, open, high, low, close, volume (lowercase)
-            # yfinance expects: Date (index), Adj Close (col)
-            if df is not None and not df.empty:
-                df = df.set_index('time')
-                df.index = pd.to_datetime(df.index)
-                series = df['close'] 
-                # Rename series to ORIGINAL ticker requested (to match dict keys)
-                series.name = t
-                return t, series
-        except Exception as e:
-            print(f"Err hist {t}: {e}")
-        return t, None
-
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        results = executor.map(fetch_one, tickers)
-        
-    for t, series in results:
-        if series is not None:
-             result_dict[t] = series
-             
-    if not result_dict:
-        return pd.DataFrame()
-        
-    return pd.DataFrame(result_dict)
 
 def get_data(tickers, period="5y"): 
-    # Logic: Prefer Vnstock for Vietnam stocks (.VN or no suffix), yfinance for Crypto/US
+    """
+    Fetch historical data (Adj Close) for multiple tickers.
+    STRATEGY: Use yfinance for everything because it's stable, fast, and handles batch requests perfectly.
+    VNStock is only used for Fundamentals.
+    """
     
-    # TREAT ^VNINDEX as a VN ticker
-    vn_tickers = [t for t in tickers if ".VN" in t or t == "^VNINDEX" or (len(t) <= 3 and "-" not in t)]
-    us_tickers = [t for t in tickers if t not in vn_tickers]
-    
-    df_vn = pd.DataFrame()
-    df_us = pd.DataFrame()
-    
-    # 1. Fetch VN data
-    if vn_tickers:
-        print(f"Fetching VNStock: {vn_tickers}")
-        df_vn = get_data_vnstock_hist(vn_tickers, period)
+    # 1. Standardize Tickers for Yahoo
+    # Yahoo needs .VN suffix for VN stocks.
+    yf_tickers = []
+    for t in tickers:
+        clean = t.strip().upper()
+        # Handle Index mapping
+        if clean == "VNINDEX": clean = "^VNINDEX"
+        # Add suffix if missing
+        if "-" not in clean and "^" not in clean and ".VN" not in clean:
+            clean += ".VN"
+        yf_tickers.append(clean)
         
-    # 2. Fetch US data (yfinance)
-    if us_tickers:
-        print(f"Fetching YFinance: {us_tickers}")
-        df_us = yf.download(us_tickers, period=period, progress=False, auto_adjust=False)['Adj Close']
-        
-    # Merge
-    if df_vn.empty: return df_us
-    if df_us.empty: return df_vn
+    print(f"Fetching YFinance (Batch): {len(yf_tickers)} tickers | Period: {period}")
     
-    # Align dates
-    return pd.concat([df_vn, df_us], axis=1).ffill().dropna()
+    try:
+        # Batch download is extremely fast (1 request for all)
+        data = yf.download(yf_tickers, period=period, progress=False, auto_adjust=False)['Adj Close']
+        
+        # If single ticker result (Series), convert to DataFrame
+        if isinstance(data, pd.Series):
+            data = data.to_frame(name=yf_tickers[0])
+            
+        # Data Cleaning
+        data = data.dropna(axis=1, how='all')
+        if data.empty: return data
+        
+        # Forward Fill & Drop NaN
+        data = data.ffill().dropna()
+        
+        # Normalize column names (remove .VN for internal logic if needed? 
+        # Actually existing logic expects .VN mostly, but RRG might want simple names.
+        # Let's keep .VN to match the provided list format)
+        
+        return data
+        
+    except Exception as e:
+        print(f"Data Fetch Error: {e}")
+        return pd.DataFrame()
 
 
 def calculate_rrg_data(tickers, benchmark="^VNINDEX"): # Sử dụng VNINDEX làm bench
