@@ -13,6 +13,7 @@ import {
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 import zoomPlugin from 'chartjs-plugin-zoom';
+import CommandCenter from './components/CommandCenter';
 
 ChartJS.register(
   CategoryScale,
@@ -208,6 +209,9 @@ function App() {
   return (
     <div style={{ padding: "10px 20px", fontFamily: "Arial, sans-serif", maxWidth: "100%", margin: "0 auto", backgroundColor: "#1e1e1e", color: "#e0e0e0", minHeight: "100vh", boxSizing: "border-box" }}>
       <h1 style={{ color: "#646cff", textAlign: "center", marginBottom: "20px", fontSize: "1.5rem" }}>Quant Trading Dashboard 3.0 (Ultimate)</h1>
+
+      {/* COMMAND CENTER DASHBOARD */}
+      <CommandCenter />
 
       <div style={gridContainerStyle}>
 

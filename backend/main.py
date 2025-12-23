@@ -7,6 +7,13 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+# VNSTOCK IMPORT (Try/Except to avoid crash if not installed)
+try:
+    from vnstock import Finance
+    VNSTOCK_AVAILABLE = True
+except ImportError:
+    VNSTOCK_AVAILABLE = False
+    print("Warning: vnstock not available (Fundamentals will be empty)")
 
 app = FastAPI()
 
@@ -255,6 +262,105 @@ class BacktestRequest(BaseModel):
     transaction_fee: float = 0.0015 # Phí giao dịch (0.15%)
     custom_weights: Optional[Dict[str, float]] = None # Nhận tỷ trọng thủ công
 
+# --- DASHBOARD ENGINE (COMMAND CENTER) ---
+VN30_LIST = ["ACB.VN", "BCM.VN", "BID.VN", "BVH.VN", "CTG.VN", "FPT.VN", "GAS.VN", "GVR.VN", "HDB.VN", "HPG.VN", "MBB.VN", "MSN.VN", "MWG.VN", "PLX.VN", "POW.VN", "SAB.VN", "SHB.VN", "SSB.VN", "SSI.VN", "STB.VN", "TCB.VN", "TPB.VN", "VCB.VN", "VHM.VN", "VIB.VN", "VIC.VN", "VJC.VN", "VNM.VN", "VPB.VN", "VRE.VN"]
+
+def get_vnstock_fundamentals(ticker):
+    """Lấy chỉ số cơ bản từ VNStock (P/E, ROE...)"""
+    if not VNSTOCK_AVAILABLE:
+        return {"pe": 0, "roe": 0, "eps": 0, "pb": 0, "source": "N/A"}
+    
+    clean_ticker = ticker.replace(".VN", "").strip()
+    try:
+        fin = Finance(symbol=clean_ticker, source='VCI')
+        # Lấy chỉ số tài chính (Quarterly hoặc Yearly)
+        # VNStock v3 trả về DataFrame
+        df_ratio = fin.ratio(period='quarterly', lang='vi')
+        
+        if df_ratio is None or df_ratio.empty:
+             return {"pe": 0, "roe": 0, "eps": 0, "pb": 0, "source": "Empty"}
+             
+        # Lấy dòng mới nhất (Quý gần nhất)
+        latest = df_ratio.iloc[0] # Giả sử sort desc? Cần check sort
+        # VNStock thường trả về thời gian giảm dần (mới nhất ở trên)
+        
+        # Mapping tên cột (Cần debug tên cột thực tế nếu lỗi)
+        # Giả định tên cột chuẩn: 'priceToEarning', 'roe', 'earningPerShare', 'priceToBook'
+        # Hoặc dùng get để an toàn
+        
+        return {
+            "pe": round(latest.get('priceToEarning', 0), 2),
+            "roe": round(latest.get('roe', 0) * 100, 2), # ROE thường là số thập phân
+            "eps": round(latest.get('earningPerShare', 0), 0),
+            "pb": round(latest.get('priceToBook', 0), 2),
+            "source": "VCI/VNStock"
+        }
+    except Exception as e:
+        print(f"VNStock Error for {ticker}: {e}")
+        return {"pe": 0, "roe": 0, "eps": 0, "pb": 0, "source": "Error"}
+
+def calculate_rrg_data(tickers, benchmark="^VNINDEX"): # Sử dụng VNINDEX làm bench
+    # 1. Fetch Data (Price History)
+    all_tickers = tickers + [benchmark]
+    # Download 1 year data
+    data = yf.download(all_tickers, period="1y", progress=False)['Adj Close']
+    
+    # Fix MultiIndex if any
+    if isinstance(data.columns, pd.MultiIndex):
+        data.columns = data.columns.get_level_values(0)
+    
+    # Forward Fill & Drop NaN
+    data = data.ffill().dropna()
+    
+    if benchmark not in data.columns:
+        return []
+
+    bench_series = data[benchmark]
+    rrg_results = []
+    
+    for t in tickers:
+        if t not in data.columns: continue
+        
+        # 2. Compute RS (Relative Strength)
+        # RS = 100 * (Price / Benchmark)
+        rs_raw = 100 * (data[t] / bench_series)
+        
+        # 3. Compute JdK RS-Ratio (Moving Average of RS / StdDev -> Simplified: Just MA)
+        # Simplified RRG Logic:
+        # RS-Ratio = (RS / MA(RS, 10)) * 100 (Measure Trend) -> Using lookback 10-20
+        # Actually RRG uses normalized algo. Let's use a robust proxy.
+        # RS_Ratio ~ Exponential Moving Average of RS
+        
+        rs_ratio_series = rs_raw.rolling(window=10).mean()
+        
+        # 4. Compute JdK RS-Momentum (Rate of Change of RS-Ratio)
+        # Momentum = 100 + ((RS-Ratio - MA(RS-Ratio)) / MA(RS-Ratio)) * 100
+        # Simplest: ROC of RS-Ratio
+        
+        rs_mom_series = rs_ratio_series.pct_change(periods=5) * 100 + 100 # Center at 100
+        
+        # Get latest values
+        if len(rs_ratio_series) < 1 or len(rs_mom_series) < 1: continue
+        
+        curr_ratio = rs_ratio_series.iloc[-1]
+        curr_mom = rs_mom_series.iloc[-1]
+        
+        # Determine Quadrant
+        quadrant = ""
+        if curr_ratio > 100 and curr_mom > 100: quadrant = "Leading (Dẫn dắt) 🟢"
+        elif curr_ratio > 100 and curr_mom < 100: quadrant = "Weakening (Suy yếu) 🟡"
+        elif curr_ratio < 100 and curr_mom < 100: quadrant = "Lagging (Tụt hậu) 🔴"
+        else: quadrant = "Improving (Cải thiện) 🔵"
+        
+        rrg_results.append({
+            "ticker": t.replace(".VN", ""),
+            "x": round(curr_ratio, 2), # RS-Ratio
+            "y": round(curr_mom, 2),   # RS-Momentum
+            "quadrant": quadrant
+        })
+        
+    return rrg_results
+
 # --- ENDPOINTS ---
 
 @app.get("/")
@@ -404,6 +510,77 @@ def backtest_endpoint(req: BacktestRequest):
             "mode": mode_message,
             "final_weights": valid_weights if mode_message == "Thủ công (Manual Allocation)" else None
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/dashboard/sentiment")
+def get_dashboard_sentiment():
+    try:
+        # 1. Market Sentiment (VN30 NTF Score)
+        data = get_data(VN30_LIST, period="6mo")
+        ntf_scores = calculate_ntf(data, lookback=20)
+        
+        if "error" in ntf_scores:
+            return {"score": 0, "status": "No Data", "top_movers": []}
+        
+        # Calc Average Score (Market Health)
+        valid_scores = [v for v in ntf_scores.values()]
+        avg_score = sum(valid_scores) / len(valid_scores) if valid_scores else 0
+        
+        # Normalize to 0-100 or 0-1 range for Gauge?
+        # NTF Score output usually is raw value (returns * 252). E.g. 0.5 (50% CAGR momentum)
+        # Let's map: <0: Fear, 0-0.5: Neutral, >0.5: Greed
+        
+        # Determine Status
+        status = "Bình thường"
+        color = "yellow"
+        if avg_score < -0.1: status = "SỢ HÃI (Giữ tiền) 🐻"; color = "red"
+        elif avg_score > 0.3: status = "THAM LAM (Full Margin) 🐮"; color = "green"
+        
+        # 2. Top 3 Movers (Strongest)
+        sorted_tickers = sorted(ntf_scores.items(), key=lambda x: x[1], reverse=True)
+        top_3 = []
+        for t, s in sorted_tickers[:3]:
+            # Simple recommendation
+            rec = "MUA MẠNH" if s > 0.3 else ("MUA" if s > 0 else "QUAN SÁT")
+            top_3.append({"ticker": t.replace(".VN",""), "score": s, "action": rec})
+            
+        return {
+            "market_score": round(avg_score, 4),
+            "market_status": status,
+            "market_color": color,
+            "top_movers": top_3
+        }
+    except Exception as e:
+        print(f"Sentiment Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/dashboard/rrg")
+def get_dashboard_rrg(req: Optional[NTFRequest] = None):
+    # If tickers provided, use them, else use VN30
+    tickers_to_use = VN30_LIST
+    if req and req.tickers:
+        tickers_to_use = [t.strip() for t in req.tickers.split(",")]
+        
+    try:
+        results = calculate_rrg_data(tickers_to_use)
+        return {"data": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class FundamentalRequest(BaseModel):
+    ticker: str
+
+@app.post("/api/dashboard/fundamentals")
+def get_dashboard_fundamentals(req: FundamentalRequest):
+    try:
+        ticker = req.ticker.strip().upper()
+        if "-" not in ticker and ".VN" not in ticker and len(ticker) <= 3:
+             ticker += ".VN"
+        
+        data = get_vnstock_fundamentals(ticker)
+        return {"data": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
