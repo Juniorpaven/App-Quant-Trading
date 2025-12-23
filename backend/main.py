@@ -261,8 +261,29 @@ class BacktestRequest(BaseModel):
 # --- DASHBOARD ENGINE (COMMAND CENTER) ---
 VN30_LIST = ["ACB.VN", "BCM.VN", "BID.VN", "BVH.VN", "CTG.VN", "FPT.VN", "GAS.VN", "GVR.VN", "HDB.VN", "HPG.VN", "MBB.VN", "MSN.VN", "MWG.VN", "PLX.VN", "POW.VN", "SAB.VN", "SHB.VN", "SSB.VN", "SSI.VN", "STB.VN", "TCB.VN", "TPB.VN", "VCB.VN", "VHM.VN", "VIB.VN", "VIC.VN", "VJC.VN", "VNM.VN", "VPB.VN", "VRE.VN"]
 
+# --- VNSTOCK INTEGRATION ---
+
+def get_vnstock_price(ticker):
+    """Get latest close price from vnstock"""
+    try:
+        from vnstock import Vnstock
+        clean_ticker = ticker.replace(".VN", "").strip()
+        # Fetch just last few days to get latest close
+        stock = Vnstock().stock(symbol=clean_ticker, source='VCI')
+        # Using a small window to ensure we get data
+        now = datetime.now()
+        start_date = (now - timedelta(days=7)).strftime('%Y-%m-%d')
+        end_date = now.strftime('%Y-%m-%d')
+        
+        df = stock.quote.history(symbol=clean_ticker, start=start_date, end=end_date)
+        if df is not None and not df.empty:
+            return df['close'].iloc[-1]
+    except Exception as e:
+        print(f"Price error for {ticker}: {e}")
+    return 0
+
 def get_vnstock_fundamentals(ticker):
-    """Lấy chỉ số cơ bản từ VNStock (P/E, ROE...)"""
+    """Lấy chỉ số cơ bản từ VNStock (P/E TTM, ROE...)"""
     # LAZY IMPORT VNSTOCK
     try:
         from vnstock import Finance
@@ -278,41 +299,137 @@ def get_vnstock_fundamentals(ticker):
     clean_ticker = ticker.replace(".VN", "").strip()
     try:
         fin = Finance(symbol=clean_ticker, source='VCI')
+        
+        # 1. Fetch Quarterly Ratios for TTM Calc
         df = fin.ratio(period='quarterly', lang='vi')
         
         if df is None or df.empty:
              return {"pe": 0, "roe": 0, "eps": 0, "pb": 0, "source": "Empty"}
              
-        # Flatten MultiIndex Columns if present
+        # Flatten MultiIndex Columns
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = [' '.join(col).strip() for col in df.columns.values]
             
-        # Helper to find value by robust keyword search
-        row = df.iloc[0].to_dict() # Newest data
-        
-        def get_val(keywords):
-            for k, v in row.items():
-                k_lower = k.lower()
-                if any(kw in k_lower for kw in keywords):
-                    return v
-            return 0
+        # Helper to find value by keyword (Robust)
+        def get_series(keywords, limit=1):
+            for col in df.columns:
+                col_lower = col.lower()
+                if any(kw in col_lower for kw in keywords):
+                    return df[col].head(limit).values
+            return [0] * limit
 
-        # Mapping keys based on typical Vietnamese finance terms
-        pe = get_val(['p/e', 'price to earning'])
-        pb = get_val(['p/b', 'price to book'])
-        roe = get_val(['roe', 'return on equity'])
-        eps = get_val(['eps', 'earning per share', 'lợi nhuận trên mỗi cổ phần'])
+        # 2. Calculate EPS TTM (Sum 4 quarters)
+        eps_quarters = get_series(['eps', 'earning per share', 'lợi nhuận trên mỗi'], limit=4)
+        eps_ttm = sum([float(x) for x in eps_quarters if pd.notnull(x)])
+        
+        # 3. Get other metrics (Latest Quarter)
+        roe_latest = float(get_series(['roe', 'return on equity'])[0])
+        pb_latest = float(get_series(['p/b', 'price to book'])[0])
+        
+        # 4. Get Realtime Price for P/E
+        price_now = get_vnstock_price(clean_ticker) * 1000 # Vnstock price is often in k VND? CHECK! 
+        # Wait, vnstock history returns absolute price e.g. 58.95 -> 58950? 
+        # Actually in debug output: 58.95. FireAnt EPS 1209. 
+        # Let's check debug output again.
+        # History: 58.95. 
+        # Dashboard EPS: 1209. 
+        # PE = 58950 / 4160 ~ 14. 
+        # If vnstock price 58.95 means 58,950 VND, then we multiply by 1000.
+        # Let's assume vnstock returns price in 'thousands' (check debug 434: 58.95). 
+        # Standardize for calc: 58.95 * 1000 = 58950.
+        
+        if price_now < 1000: price_now *= 1000
+        
+        pe_realtime = 0
+        if eps_ttm > 0:
+            pe_realtime = price_now / eps_ttm
 
         return {
-            "pe": round(float(pe), 2),
-            "roe": round(float(roe) * 100 if float(roe) < 5 else float(roe), 2), # Auto detect percentage vs decimal
-            "eps": round(float(eps), 0),
-            "pb": round(float(pb), 2),
-            "source": "VCI/VNStock"
+            "pe": round(pe_realtime, 2),
+            "roe": round(roe_latest * 100 if roe_latest < 5 else roe_latest, 2),
+            "eps": round(eps_ttm, 0),
+            "pb": round(pb_latest, 2),
+            "source": "Vnstock TTM"
         }
     except Exception as e:
         print(f"VNStock Error for {ticker}: {e}")
         return {"pe": 0, "roe": 0, "eps": 0, "pb": 0, "source": "Error"}
+
+def get_data_vnstock_hist(tickers, period="1y"):
+    """Fetch historical data for multiple tickers using vnstock"""
+    from vnstock import Vnstock
+    import pandas as pd
+    from concurrent.futures import ThreadPoolExecutor
+    
+    # Calculate start date
+    days = 365
+    if period == "6mo": days = 180
+    elif period == "3mo": days = 90
+    elif period == "2y": days = 365*2
+    elif period == "5y": days = 365*5
+    
+    end_date = datetime.now().strftime('%Y-%m-%d')
+    start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+    
+    result_dict = {}
+    
+    def fetch_one(t):
+        try:
+            clean = t.replace(".VN", "").strip()
+            stock = Vnstock().stock(symbol=clean, source='VCI')
+            df = stock.quote.history(symbol=clean, start=start_date, end=end_date)
+            # Standardize
+            # vnstock returns: time, open, high, low, close, volume (lowercase)
+            # yfinance expects: Date (index), Adj Close (col)
+            if df is not None and not df.empty:
+                df = df.set_index('time')
+                df.index = pd.to_datetime(df.index)
+                series = df['close'] 
+                # Rename series to ticker
+                series.name = t
+                return t, series
+        except Exception as e:
+            print(f"Err hist {t}: {e}")
+        return t, None
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        results = executor.map(fetch_one, tickers)
+        
+    for t, series in results:
+        if series is not None:
+             result_dict[t] = series
+             
+    if not result_dict:
+        return pd.DataFrame()
+        
+    return pd.DataFrame(result_dict)
+
+def get_data(tickers, period="5y"): 
+    # Logic: Prefer Vnstock for Vietnam stocks (.VN or no suffix), yfinance for Crypto/US
+    
+    vn_tickers = [t for t in tickers if ".VN" in t or (len(t) <= 3 and "-" not in t)]
+    us_tickers = [t for t in tickers if t not in vn_tickers]
+    
+    df_vn = pd.DataFrame()
+    df_us = pd.DataFrame()
+    
+    # 1. Fetch VN data
+    if vn_tickers:
+        print(f"Fetching VNStock: {vn_tickers}")
+        df_vn = get_data_vnstock_hist(vn_tickers, period)
+        
+    # 2. Fetch US data (yfinance)
+    if us_tickers:
+        print(f"Fetching YFinance: {us_tickers}")
+        df_us = yf.download(us_tickers, period=period, progress=False, auto_adjust=False)['Adj Close']
+        
+    # Merge
+    if df_vn.empty: return df_us
+    if df_us.empty: return df_vn
+    
+    # Align dates
+    return pd.concat([df_vn, df_us], axis=1).ffill().dropna()
+
 
 def calculate_rrg_data(tickers, benchmark="^VNINDEX"): # Sử dụng VNINDEX làm bench
     # 1. Fetch Data (Price History)
