@@ -4,6 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict
 import yfinance as yf
+import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
 
 # Removed top-level vnstock import to prevent startup timeout
