@@ -10,6 +10,10 @@
     window.global = window;
     window.process = { env: {} };
   </script>
+  <script type="module">
+    import { Buffer } from 'buffer';
+    window.Buffer = Buffer;
+  </script>
 </head>
 
 <body>

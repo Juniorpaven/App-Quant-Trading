@@ -7,6 +7,11 @@ export default defineConfig({
   define: {
     global: 'window',
   },
+  resolve: {
+    alias: {
+      buffer: 'buffer/',
+    },
+  },
   build: {
     chunkSizeWarningLimit: 1600,
     rollupOptions: {
