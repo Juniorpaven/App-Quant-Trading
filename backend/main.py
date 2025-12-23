@@ -659,7 +659,39 @@ def ask_ai_endpoint(req: AiRequest):
         data = yf.download(ticker, period="1y", progress=False)
         
         if len(data) < 60:
-             raise HTTPException(status_code=400, detail="Không đủ dữ liệu lịch sử.")
+             print(f"Build-in yfinance failed/insufficient for {ticker}. Trying vnstock fallback...")
+             try:
+                 from vnstock import Vnstock
+                 clean_ticker = ticker.replace(".VN", "").strip()
+                 end_str = datetime.now().strftime("%Y-%m-%d")
+                 start_str = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+                 
+                 # Fetch from vnstock
+                 stock_cls = Vnstock().stock(symbol=clean_ticker, source='VCI')
+                 df_vn = stock_cls.quote.history(start=start_str, end=end_str)
+                 
+                 if df_vn is not None and not df_vn.empty:
+                     # Standardize to match yfinance structure
+                     df_vn = df_vn.rename(columns={
+                         'time': 'Date', 'open': 'Open', 'high': 'High', 
+                         'low': 'Low', 'close': 'Close', 'volume': 'Volume'
+                     })
+                     df_vn['Date'] = pd.to_datetime(df_vn['Date'])
+                     df_vn = df_vn.set_index('Date')
+                     
+                     # Ensure numeric types
+                     cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+                     for c in cols:
+                         if c in df_vn.columns:
+                             df_vn[c] = pd.to_numeric(df_vn[c], errors='coerce')
+                     
+                     data = df_vn
+                     print(f"vnstock fallback success: {len(data)} rows")
+             except Exception as e:
+                 print(f"vnstock fallback error: {e}")
+
+        if len(data) < 60:
+             raise HTTPException(status_code=400, detail="Không đủ dữ liệu lịch sử (cả yfinance và vnstock đều k tìm thấy).")
              
         # Fix lỗi MultiIndex của yfinance
         if isinstance(data.columns, pd.MultiIndex):
