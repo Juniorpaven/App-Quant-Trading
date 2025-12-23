@@ -263,9 +263,10 @@ VN30_LIST = ["ACB.VN", "BCM.VN", "BID.VN", "BVH.VN", "CTG.VN", "FPT.VN", "GAS.VN
 
 def get_vnstock_fundamentals(ticker):
     """Lấy chỉ số cơ bản từ VNStock (P/E, ROE...)"""
-    # LAZY IMPORT VNSTOCK (To avoid slow startup on Render)
+    # LAZY IMPORT VNSTOCK
     try:
         from vnstock import Finance
+        import pandas as pd
         vnstock_available = True
     except ImportError:
         vnstock_available = False
@@ -277,21 +278,36 @@ def get_vnstock_fundamentals(ticker):
     clean_ticker = ticker.replace(".VN", "").strip()
     try:
         fin = Finance(symbol=clean_ticker, source='VCI')
-        # Lấy chỉ số tài chính (Quarterly hoặc Yearly)
-        # VNStock v3 trả về DataFrame
-        df_ratio = fin.ratio(period='quarterly', lang='vi')
+        df = fin.ratio(period='quarterly', lang='vi')
         
-        if df_ratio is None or df_ratio.empty:
+        if df is None or df.empty:
              return {"pe": 0, "roe": 0, "eps": 0, "pb": 0, "source": "Empty"}
              
-        # Lấy dòng mới nhất (Quý gần nhất)
-        latest = df_ratio.iloc[0] # Giả sử sort desc? Cần check sort
+        # Flatten MultiIndex Columns if present
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = [' '.join(col).strip() for col in df.columns.values]
+            
+        # Helper to find value by robust keyword search
+        row = df.iloc[0].to_dict() # Newest data
         
+        def get_val(keywords):
+            for k, v in row.items():
+                k_lower = k.lower()
+                if any(kw in k_lower for kw in keywords):
+                    return v
+            return 0
+
+        # Mapping keys based on typical Vietnamese finance terms
+        pe = get_val(['p/e', 'price to earning'])
+        pb = get_val(['p/b', 'price to book'])
+        roe = get_val(['roe', 'return on equity'])
+        eps = get_val(['eps', 'earning per share', 'lợi nhuận trên mỗi cổ phần'])
+
         return {
-            "pe": round(latest.get('priceToEarning', 0), 2),
-            "roe": round(latest.get('roe', 0) * 100, 2), # ROE thường là số thập phân
-            "eps": round(latest.get('earningPerShare', 0), 0),
-            "pb": round(latest.get('priceToBook', 0), 2),
+            "pe": round(float(pe), 2),
+            "roe": round(float(roe) * 100 if float(roe) < 5 else float(roe), 2), # Auto detect percentage vs decimal
+            "eps": round(float(eps), 0),
+            "pb": round(float(pb), 2),
             "source": "VCI/VNStock"
         }
     except Exception as e:
