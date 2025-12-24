@@ -356,63 +356,105 @@ def get_vnstock_fundamentals(ticker):
         return {"pe": 0, "roe": 0, "eps": 0, "pb": 0, "source": "Error"}
 
 
+def get_data_vnstock_sequential(tickers, period="1y"):
+    """
+    Fallback data fetcher using Vnstock (Sequential) to avoid IP blocking.
+    Slow but reliable.
+    """
+    from vnstock import Vnstock
+    import pandas as pd
+    import time
+    
+    # Calculate start date based on period
+    days = 365
+    if period == "6mo": days = 180
+    elif period == "3mo": days = 90
+    elif period == "2y": days = 365*2
+    elif period == "5y": days = 365*5
+    
+    end_date = datetime.now().strftime('%Y-%m-%d')
+    start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+    
+    result_dict = {}
+    print(f"Fallback: Fetching {len(tickers)} tickers sequentially via Vnstock...")
+    
+    for t in tickers:
+        try:
+            # Map Yahoo format to Vnstock format
+            clean = t.strip().upper()
+            if clean == "^VNINDEX": clean = "VNINDEX"
+            clean = clean.replace(".VN", "")
+            
+            stock = Vnstock().stock(symbol=clean, source='VCI')
+            df = stock.quote.history(symbol=clean, start=start_date, end=end_date)
+            
+            if df is not None and not df.empty:
+                df = df.set_index('time')
+                df.index = pd.to_datetime(df.index)
+                series = df['close']
+                series.name = t # Keep original requested name
+                result_dict[t] = series
+            
+            # Small delay to be polite
+            time.sleep(0.0) 
+        except Exception as e:
+            print(f"Vnstock fallback error for {t}: {e}")
+            
+    if not result_dict:
+        return pd.DataFrame()
+        
+    return pd.DataFrame(result_dict)
+
 def get_data(tickers, period="5y"): 
     """
-    Fetch historical data (Adj Close) for multiple tickers.
-    STRATEGY: Use yfinance for everything because it's stable, fast, and handles batch requests perfectly.
-    VNStock is only used for Fundamentals.
+    Smart Data Fetcher:
+    1. Try Yahoo Finance (Batch) -> Fast (2s).
+    2. If Yahoo returns empty (likely blocked on Cloud), fallback to Vnstock (Sequential) -> Slow (15-30s) but works.
     """
     
     # 1. Standardize Tickers for Yahoo
-    # Yahoo needs .VN suffix for VN stocks.
     yf_tickers = []
     for t in tickers:
         clean = t.strip().upper()
-        # Handle Index mapping
         if clean == "VNINDEX": clean = "^VNINDEX"
-        # Add suffix if missing
         if "-" not in clean and "^" not in clean and ".VN" not in clean:
             clean += ".VN"
         yf_tickers.append(clean)
         
-    print(f"Fetching YFinance (Batch): {len(yf_tickers)} tickers | Period: {period}")
+    print(f"ATTEMPT 1: Fetching Yahoo Batch ({len(yf_tickers)} tickers)...")
     
     try:
-        # Batch download is extremely fast (1 request for all)
-        # Using auto_adjust=True to get 'Close' which accounts for splits (standard practice now)
+        # Using auto_adjust=True to get 'Close'
         data_raw = yf.download(yf_tickers, period=period, progress=False, auto_adjust=True)
         
-        # Robustly select the price column
-        # Recent yf versions with auto_adjust=True return 'Close'
-        # Older versions or auto_adjust=False return 'Adj Close'
         target_col = None
-        if 'Close' in data_raw.columns:
-            target_col = 'Close'
-        elif 'Adj Close' in data_raw.columns:
-             target_col = 'Adj Close'
+        if 'Close' in data_raw.columns: target_col = 'Close'
+        elif 'Adj Close' in data_raw.columns: target_col = 'Adj Close'
              
+        data = pd.DataFrame()
         if target_col:
             data = data_raw[target_col]
         else:
-            # Fallback for single ticker or unexpected structure
             data = data_raw
-        
-        # If single ticker result (Series), convert to DataFrame with proper name
+
         if isinstance(data, pd.Series):
             data = data.to_frame(name=yf_tickers[0])
             
-        # Data Cleaning
         data = data.dropna(axis=1, how='all')
-        if data.empty: return pd.DataFrame() # Return empty DF if no data
         
-        # Forward Fill & Drop NaN
-        data = data.ffill().dropna()
-        
-        return data
-        
+        # CHECK SUCCESS
+        if not data.empty and data.shape[1] > 0:
+            print("Yahoo Fetch Success.")
+            return data.ffill().dropna()
+        else:
+            print("Yahoo returned empty data. Switching to Fallback.")
+            
     except Exception as e:
-        print(f"Data Fetch Error: {e}")
-        return pd.DataFrame()
+        print(f"Yahoo Fetch Error: {e}")
+        
+    # 2. FALLBACK TO VNSTOCK
+    print("ATTEMPT 2: Switching to Vnstock Sequential...")
+    return get_data_vnstock_sequential(yf_tickers, period).ffill().dropna()
 
 
 def calculate_rrg_data(tickers, benchmark="^VNINDEX"): # Sử dụng VNINDEX làm bench
