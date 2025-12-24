@@ -227,11 +227,11 @@ const CommandCenter = () => {
                 <h2 style={{ margin: 0, fontSize: '1.2em', letterSpacing: '2px', textTransform: 'uppercase', color: '#00e676' }}>🛡️ QUANT COCKPIT - TITAN MODE</h2>
             </div>
 
-            {/* ERROR / FALLBACK UI */}
-            {(marketError || isRrgLoading) && (
+            {/* ERROR / FALLBACK UI - ALWAYS SHOW IF NO DATA */}
+            {(marketError || isRrgLoading || rrgData.length === 0) && (
                 <div style={{ marginBottom: '20px', padding: '10px', border: '1px dashed #333', borderRadius: '8px', textAlign: 'center' }}>
                     <p style={{ color: '#888', fontSize: '0.9em' }}>
-                        {isRrgLoading && !marketError ? "⏳ Đang kết nối Server..." : "⚠️ Server quá tải hoặc mất kết nối."}
+                        {isRrgLoading && !marketError && rrgData.length === 0 ? "⏳ Đang kết nối Server..." : "⚠️ Chưa có dữ liệu RRG."}
                     </p>
 
                     {/* FILE UPLOAD BUTTON */}
@@ -249,7 +249,7 @@ const CommandCenter = () => {
                         📂 Nạp File Snapshot (RRG)
                         <input type="file" accept=".csv" onChange={handleFileUpload} style={{ display: 'none' }} />
                     </label>
-                    <div style={{ fontSize: '10px', color: '#666', marginTop: '5px' }}>Nếu RRG không hiện, hãy dùng file CSV từ Colab để xem ngay.</div>
+                    <div style={{ fontSize: '10px', color: '#666', marginTop: '5px' }}>Dùng file CSV từ Colab để xem ngay nếu Server chậm.</div>
                 </div>
             )}
 
@@ -390,13 +390,11 @@ const CommandCenter = () => {
                                 </select>
                             )}
 
-                            {/* Small re-upload trigger */}
-                            {!isRrgLoading && rrgData.length > 0 && (
-                                <label style={{ cursor: 'pointer', fontSize: '10px', color: '#666', textDecoration: 'underline' }}>
-                                    (Tải lại CSV)
-                                    <input type="file" accept=".csv" onChange={handleFileUpload} style={{ display: 'none' }} />
-                                </label>
-                            )}
+                            {/* PERMANENT UPLOAD TRIGGER */}
+                            <label style={{ cursor: 'pointer', fontSize: '10px', color: '#666', textDecoration: 'underline', marginLeft: '10px' }}>
+                                (📂 Nạp CSV)
+                                <input type="file" accept=".csv" onChange={handleFileUpload} style={{ display: 'none' }} />
+                            </label>
                         </div>
 
                         {isRrgLoading && rrgData.length === 0 ? ( // Only show loading if no data and still loading
