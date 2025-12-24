@@ -17,6 +17,8 @@ const CommandCenter = () => {
     const [marketError, setMarketError] = useState(false);
     const [leaders, setLeaders] = useState([]);
 
+    const isManualMode = React.useRef(false); // Flag to prevent API overwrites
+
     useEffect(() => {
         fetchSentiment();
         fetchRRG();
@@ -25,15 +27,50 @@ const CommandCenter = () => {
     const fetchSentiment = async () => {
         try {
             const res = await axios.get(`${API_URL}/api/dashboard/sentiment`);
+
+            // If user has already uploaded manual data, DO NOT overwrite with API
+            if (isManualMode.current) return;
+
             setSentiment(res.data);
+
+            // Sync API top movers to leaders state
+            if (res.data && res.data.top_movers) {
+                setLeaders(res.data.top_movers.map(m => m.ticker));
+            }
         } catch (e) { console.error("Sentiment error", e); }
     };
 
     const fetchRRG = async () => {
         try {
+            setIsRrgLoading(true);
             const res = await axios.post(`${API_URL}/api/dashboard/rrg`);
-            setRrgData(res.data.data || []);
-        } catch (e) { console.error("RRG error", e); }
+
+            // If user has already uploaded manual data, DO NOT overwrite with API
+            if (isManualMode.current) {
+                setIsRrgLoading(false);
+                return;
+            }
+
+            const data = res.data.data || [];
+            setRrgData(data);
+
+            // If we have RRG data but no leaders yet (and no sentiment top movers), 
+            // we could calculate leaders here too, but sentiment usually handles it.
+
+            setIsRrgLoading(false);
+            setMarketError(false);
+
+            // Populate groups from API data
+            const groups = new Set(data.map(d => d.group || "Unclassified"));
+            setGroups(['ALL', ...Array.from(groups).sort()]);
+
+        } catch (e) {
+            console.error("RRG error", e);
+            if (!isManualMode.current) {
+                setIsRrgLoading(false);
+                setMarketError(true);
+            }
+        }
     };
 
     const checkFundamentals = async () => {
@@ -89,6 +126,7 @@ const CommandCenter = () => {
 
     // --- RRG SNAPSHOT UPLOAD MODE ---
     const handleFileUpload = (event) => {
+        isManualMode.current = true; // LOCK STATE: Prevent background API from overwriting
         const file = event.target.files[0];
         if (!file) return;
 
