@@ -84,6 +84,9 @@ const CommandCenter = () => {
     };
 
 
+    const [groups, setGroups] = useState([]);
+    const [selectedGroup, setSelectedGroup] = useState('ALL');
+
     // --- RRG SNAPSHOT UPLOAD MODE ---
     const handleFileUpload = (event) => {
         const file = event.target.files[0];
@@ -95,6 +98,7 @@ const CommandCenter = () => {
             // Parse CSV manually (Header: Ticker,RS_Ratio,RS_Momentum,Group,Quadrant)
             const lines = text.split('\n');
             const data = [];
+            const foundGroups = new Set();
 
             // Skip header (i=1)
             for (let i = 1; i < lines.length; i++) {
@@ -102,11 +106,13 @@ const CommandCenter = () => {
                 if (!line) continue;
                 const parts = line.split(',');
 
-                // Flexible CSV parsing (handle quotes if needed, but simple split for now)
                 // Assuming format: Ticker,RS_Ratio,RS_Momentum,Group,Quadrant
                 if (parts.length >= 3) {
                     const ratio = parseFloat(parts[1]);
                     const mom = parseFloat(parts[2]);
+                    const group = parts.length > 3 ? parts[3].trim() : "Unclassified";
+
+                    foundGroups.add(group);
 
                     let resultQuad = "Unknown";
                     if (ratio > 100 && mom > 100) resultQuad = "Leading (Dẫn dắt) 🟢";
@@ -118,18 +124,25 @@ const CommandCenter = () => {
                         ticker: parts[0],
                         x: ratio,
                         y: mom,
-                        quadrant: resultQuad // Re-calc or use from CSV if exists
+                        group: group,
+                        quadrant: resultQuad
                     });
                 }
             }
 
             setRrgData(data);
+            setGroups(['ALL', ...Array.from(foundGroups).sort()]);
             setIsRrgLoading(false);
             setMarketError(false); // Clear market error if file upload is successful
             console.log("RRG Snapshot Loaded:", data.length, "items");
         };
         reader.readAsText(file);
     };
+
+    // Filter RRG Data based on selection
+    const filteredRrgData = selectedGroup === 'ALL'
+        ? rrgData
+        : rrgData.filter(d => d.group === selectedGroup);
 
     return (
         <div style={{ padding: '20px', backgroundColor: '#121212', minHeight: '100vh', color: 'white', fontFamily: 'Inter, sans-serif' }}>
@@ -251,9 +264,29 @@ const CommandCenter = () => {
                         boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
                         minHeight: '400px'
                     }}>
-                        <div style={{ position: 'absolute', top: '15px', left: '15px', display: 'flex', gap: '10px', zIndex: 10 }}>
+                        <div style={{ position: 'absolute', top: '15px', left: '15px', display: 'flex', gap: '10px', zIndex: 10, alignItems: 'center' }}>
                             <span style={{ fontSize: '12px', color: '#00e5ff', display: 'flex', alignItems: 'center' }}>🟦 RELATIVE ROTATION GRAPH (RRG)</span>
-                            {/* Small re-upload trigger if data exists */}
+
+                            {/* SECTOR SELECTOR */}
+                            {groups.length > 0 && (
+                                <select
+                                    value={selectedGroup}
+                                    onChange={(e) => setSelectedGroup(e.target.value)}
+                                    style={{
+                                        backgroundColor: '#333',
+                                        color: 'white',
+                                        border: '1px solid #555',
+                                        padding: '2px 5px',
+                                        borderRadius: '4px',
+                                        fontSize: '11px',
+                                        marginLeft: '10px'
+                                    }}
+                                >
+                                    {groups.map(g => <option key={g} value={g}>{g}</option>)}
+                                </select>
+                            )}
+
+                            {/* Small re-upload trigger */}
                             {!isRrgLoading && rrgData.length > 0 && (
                                 <label style={{ cursor: 'pointer', fontSize: '10px', color: '#666', textDecoration: 'underline' }}>
                                     (Tải lại CSV)
@@ -272,14 +305,14 @@ const CommandCenter = () => {
                                 <Plot
                                     data={[
                                         {
-                                            x: rrgData.map(d => d.x),
-                                            y: rrgData.map(d => d.y),
-                                            text: rrgData.map(d => d.ticker),
+                                            x: filteredRrgData.map(d => d.x),
+                                            y: filteredRrgData.map(d => d.y),
+                                            text: filteredRrgData.map(d => d.ticker),
                                             mode: 'text+markers',
                                             textposition: 'top center',
                                             marker: {
                                                 size: 12,
-                                                color: rrgData.map(d => {
+                                                color: filteredRrgData.map(d => {
                                                     if (d.x > 100 && d.y > 100) return '#00e676'; // Leading Green
                                                     if (d.x < 100 && d.y > 100) return '#2979ff'; // Improving Blue
                                                     if (d.x < 100 && d.y < 100) return '#ff1744'; // Lagging Red
@@ -288,7 +321,7 @@ const CommandCenter = () => {
                                                 line: { width: 1, color: 'white' }
                                             },
                                             type: 'scatter',
-                                            hoverinfo: 'text+x+y'
+                                            hoverinfo: 'text+x+y+cluster' // cluster added for group info if formatted
                                         }
                                     ]}
                                     layout={{
