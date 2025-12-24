@@ -13,6 +13,9 @@ const CommandCenter = () => {
     const [fundTicker, setFundTicker] = useState("HPG");
     const [fundData, setFundData] = useState(null);
     const [loadingFund, setLoadingFund] = useState(false);
+    const [isRrgLoading, setIsRrgLoading] = useState(true);
+    const [marketError, setMarketError] = useState(false);
+    const [leaders, setLeaders] = useState([]);
 
     useEffect(() => {
         fetchSentiment();
