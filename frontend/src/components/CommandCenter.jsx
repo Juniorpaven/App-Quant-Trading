@@ -95,25 +95,45 @@ const CommandCenter = () => {
         const reader = new FileReader();
         reader.onload = (e) => {
             const text = e.target.result;
-            // Parse CSV manually (Header: Ticker,RS_Ratio,RS_Momentum,Group,Quadrant)
-            const lines = text.split('\n');
+            const lines = text.split('\n').filter(l => l.trim());
             const data = [];
             const foundGroups = new Set();
 
-            // Skip header (i=1)
+            // AUTO DETECT CSV STRUCTURE
+            // Check first line to see if it has header "Unnamed: 0" or just standard cols
+            // If the first real data line starts with an integer index, we skip col 0.
+            const firstDataLine = lines.length > 1 ? lines[1].split(',') : [];
+            let hasIndexCol = false;
+
+            // Heuristic Not perfect but good enough: 
+            // If first column is integer-like (index) AND second column is string (Ticker), we likely have an index
+            if (firstDataLine.length > 2 && !isNaN(parseInt(firstDataLine[0])) && isNaN(parseFloat(firstDataLine[1]))) {
+                hasIndexCol = true;
+            }
+
             for (let i = 1; i < lines.length; i++) {
                 const line = lines[i].trim();
                 if (!line) continue;
                 const parts = line.split(',');
 
-                // Assuming format: Ticker,RS_Ratio,RS_Momentum,Group,Quadrant
-                if (parts.length >= 3) {
-                    const ratio = parseFloat(parts[1]);
-                    const mom = parseFloat(parts[2]);
-                    const group = parts.length > 3 ? parts[3].trim() : "Unclassified";
+                // Index offset: If index col exists, shift everything by 1
+                const offset = hasIndexCol ? 1 : 0;
+
+                if (parts.length >= 3 + offset) {
+                    const ticker = parts[0 + offset];
+                    // Clean ticker just in case
+                    const cleanTicker = ticker.replace(/["']/g, "").trim();
+
+                    const ratio = parseFloat(parts[1 + offset]);
+                    const mom = parseFloat(parts[2 + offset]);
+                    let group = "Unclassified";
+                    if (parts.length > 3 + offset) {
+                        group = parts[3 + offset].replace(/[\r\n"']/g, "").trim();
+                    }
 
                     foundGroups.add(group);
 
+                    // RE-CALCULATE QUADRANT for display accuracy
                     let resultQuad = "Unknown";
                     if (ratio > 100 && mom > 100) resultQuad = "Leading (Dẫn dắt) 🟢";
                     else if (ratio > 100 && mom < 100) resultQuad = "Weakening (Suy yếu) 🟡";
@@ -121,7 +141,7 @@ const CommandCenter = () => {
                     else resultQuad = "Improving (Cải thiện) 🔵";
 
                     data.push({
-                        ticker: parts[0],
+                        ticker: cleanTicker,
                         x: ratio,
                         y: mom,
                         group: group,
@@ -130,11 +150,39 @@ const CommandCenter = () => {
                 }
             }
 
+            // UPDATE STATE
             setRrgData(data);
             setGroups(['ALL', ...Array.from(foundGroups).sort()]);
             setIsRrgLoading(false);
-            setMarketError(false); // Clear market error if file upload is successful
-            console.log("RRG Snapshot Loaded:", data.length, "items");
+            setMarketError(false);
+
+            // --- AUTO CALCULATE TOP LEADERS ---
+            // Find stocks in Leading quadrant (x>100, y>100), sort by distance from center (strength)
+            const leaders = data
+                .filter(d => d.x > 100 && d.y > 100)
+                .sort((a, b) => (b.x + b.y) - (a.x + a.y)) // Simple sort by sum of scores
+                .slice(0, 5) // Top 5
+                .map(d => d.ticker);
+
+            setLeaders(leaders);
+
+            // --- AUTO RESTORE MARKET PULSE ---
+            // Calculate a synthetic market score based on % of stocks above 100 RS-Ratio
+            const bullishCount = data.filter(d => d.x > 100).length;
+            const score = (bullishCount / data.length) * 2 - 1; // Map 0..1 to -1..1
+
+            let status = "SIDEWAYS";
+            let color = "white";
+            if (score > 0.2) { status = "BULLISH"; color = "#00e676"; }
+            else if (score < -0.2) { status = "BEARISH"; color = "#ff1744"; }
+
+            setSentiment({
+                market_status: status,
+                market_score: parseFloat(score.toFixed(2)),
+                market_color: color
+            });
+
+            console.log("RRG Snapshot Loaded:", data.length, "items. IndexCol:", hasIndexCol);
         };
         reader.readAsText(file);
     };
