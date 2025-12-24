@@ -80,159 +80,249 @@ const CommandCenter = () => {
         minWidth: "200px"
     };
 
+
+    // --- RRG SNAPSHOT UPLOAD MODE ---
+    const handleFileUpload = (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const text = e.target.result;
+            // Parse CSV manually (Header: Ticker,RS_Ratio,RS_Momentum,Group,Quadrant)
+            const lines = text.split('\n');
+            const data = [];
+
+            // Skip header (i=1)
+            for (let i = 1; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) continue;
+                const parts = line.split(',');
+
+                // Flexible CSV parsing (handle quotes if needed, but simple split for now)
+                // Assuming format: Ticker,RS_Ratio,RS_Momentum,Group,Quadrant
+                if (parts.length >= 3) {
+                    const ratio = parseFloat(parts[1]);
+                    const mom = parseFloat(parts[2]);
+
+                    let resultQuad = "Unknown";
+                    if (ratio > 100 && mom > 100) resultQuad = "Leading (Dẫn dắt) 🟢";
+                    else if (ratio > 100 && mom < 100) resultQuad = "Weakening (Suy yếu) 🟡";
+                    else if (ratio < 100 && mom < 100) resultQuad = "Lagging (Tụt hậu) 🔴";
+                    else resultQuad = "Improving (Cải thiện) 🔵";
+
+                    data.push({
+                        ticker: parts[0],
+                        x: ratio,
+                        y: mom,
+                        quadrant: resultQuad // Re-calc or use from CSV if exists
+                    });
+                }
+            }
+
+            setRrgData(data);
+            setIsRrgLoading(false);
+            setMarketError(false); // Clear market error if file upload is successful
+            console.log("RRG Snapshot Loaded:", data.length, "items");
+        };
+        reader.readAsText(file);
+    };
+
     return (
-        <div style={containerStyle}>
-            <h1 style={headerStyle}>🛡️ Quant Cockpit - Titan Mode</h1>
+        <div style={{ padding: '20px', backgroundColor: '#121212', minHeight: '100vh', color: 'white', fontFamily: 'Inter, sans-serif' }}>
+            {/* ... Header ... */}
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '20px' }}>
+                <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#00e676', marginRight: '10px', boxShadow: '0 0 10px #00e676' }}></div>
+                <h2 style={{ margin: 0, fontSize: '1.2em', letterSpacing: '2px', textTransform: 'uppercase', color: '#00e676' }}>🛡️ QUANT COCKPIT - TITAN MODE</h2>
+            </div>
 
-            {/* ROW 1: SENTIMENT & TOP MOVERS */}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "20px", marginBottom: "30px" }}>
+            {/* ERROR / FALLBACK UI */}
+            {(marketError || isRrgLoading) && (
+                <div style={{ marginBottom: '20px', padding: '10px', border: '1px dashed #333', borderRadius: '8px', textAlign: 'center' }}>
+                    <p style={{ color: '#888', fontSize: '0.9em' }}>
+                        {isRrgLoading && !marketError ? "⏳ Đang kết nối Server..." : "⚠️ Server quá tải hoặc mất kết nối."}
+                    </p>
 
-                {/* MARKET GAUGE */}
-                <div style={{ ...cardStyle, flex: 1 }}>
-                    <h3 style={sectionTitle}>Market Pulse (VN30)</h3>
-                    {sentiment ? (
-                        <div style={{ position: 'relative', height: "200px" }}>
-                            {/* STATUS TEXT (Moved outside Plotly title to avoid overlap) */}
-                            <div style={{ textAlign: 'center', marginBottom: '-10px', fontSize: '18px', fontWeight: 'bold', color: sentiment.market_color }}>
-                                {sentiment.market_status}
+                    {/* FILE UPLOAD BUTTON */}
+                    <label style={{
+                        display: 'inline-block',
+                        marginTop: '10px',
+                        padding: '8px 16px',
+                        backgroundColor: '#212121',
+                        border: '1px solid #444',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '0.9em',
+                        color: '#00e676'
+                    }}>
+                        📂 Nạp File Snapshot (RRG)
+                        <input type="file" accept=".csv" onChange={handleFileUpload} style={{ display: 'none' }} />
+                    </label>
+                    <div style={{ fontSize: '10px', color: '#666', marginTop: '5px' }}>Nếu RRG không hiện, hãy dùng file CSV từ Colab để xem ngay.</div>
+                </div>
+            )}
+
+            {/* Main Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', height: '85vh' }}>
+
+                {/* 1. CHART AREA (RRG) - SPANS 2 COLUMNS */}
+                <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+
+                    {/* MARKET PULSE HEADER (REIMAGINED) */}
+                    {sentiment && (
+                        <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: '1fr 1fr',
+                            gap: '20px',
+                            padding: '15px',
+                            backgroundColor: '#1e1e1e',
+                            borderRadius: '12px',
+                            border: '1px solid #333',
+                            boxShadow: '0 4px 20px rgba(0,0,0,0.5)'
+                        }}>
+                            {/* LEFT: SENTIMENT */}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px' }}>
+                                <div style={{ textAlign: 'center' }}>
+                                    <div style={{ fontSize: '10px', color: '#888', textTransform: 'uppercase', letterSpacing: '1px' }}>MARKET PULSE (VN30)</div>
+                                    <h3 style={{ margin: '5px 0', fontSize: '1.8em', color: sentiment.market_color }}>{sentiment.market_status}</h3>
+                                    <div style={{ fontSize: '2em', fontWeight: 'bold', color: sentiment.market_color }}>{sentiment.market_score}</div>
+                                </div>
+
+                                {/* Mini Gauge Chart */}
+                                <div style={{ width: '120px', height: '60px' }}>
+                                    <Suspense fallback={<div>...</div>}>
+                                        <Plot
+                                            data={[{
+                                                type: "indicator",
+                                                mode: "gauge",
+                                                value: sentiment.market_score + 1, // Shift range -1..1 to 0..2 for gauge
+                                                gauge: {
+                                                    axis: { range: [0, 2], visible: false },
+                                                    bar: { color: sentiment.market_color },
+                                                    bgcolor: "#333",
+                                                    borderwidth: 0,
+                                                    steps: [
+                                                        { range: [0, 0.9], color: "#444" }, // Red zone equivalent
+                                                        { range: [0.9, 1.1], color: "#555" },
+                                                        { range: [1.1, 2], color: "#666" }
+                                                    ]
+                                                }
+                                            }]}
+                                            layout={{ width: 120, height: 60, margin: { t: 0, b: 0, l: 0, r: 0 }, paper_bgcolor: "rgba(0,0,0,0)" }}
+                                            config={{ displayModeBar: false }}
+                                        />
+                                    </Suspense>
+                                </div>
                             </div>
 
-                            <Suspense fallback={<div>Loading Chart...</div>}>
+                            {/* RIGHT: TOP LEADERS */}
+                            <div style={{ borderLeft: '1px solid #444', paddingLeft: '20px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                                <div style={{ fontSize: '10px', color: '#ff9800', marginBottom: '10px' }}>🔥 TOP LEADERS (SECTOR FLOW)</div>
+                                <div style={{ display: 'flex', gap: '10px' }}>
+                                    {leaders.length > 0 ? leaders.map((l, i) => (
+                                        <span key={i} style={{
+                                            padding: '5px 10px',
+                                            backgroundColor: '#2c2c2c',
+                                            border: `1px solid ${i === 0 ? '#ff9800' : '#444'}`,
+                                            borderRadius: '4px',
+                                            fontSize: '0.9em',
+                                            fontWeight: 'bold',
+                                            color: i === 0 ? '#ff9800' : '#ccc'
+                                        }}>
+                                            {l.replace(".VN", "")}
+                                        </span>
+                                    )) : <span style={{ color: '#666' }}>Scanning Market...</span>}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* RRG CHART MAIN */}
+                    <div style={{
+                        flex: 1,
+                        backgroundColor: '#1e1e1e',
+                        borderRadius: '12px',
+                        border: '1px solid #333',
+                        padding: '10px',
+                        position: 'relative',
+                        boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+                        minHeight: '400px'
+                    }}>
+                        <div style={{ position: 'absolute', top: '15px', left: '15px', display: 'flex', gap: '10px', zIndex: 10 }}>
+                            <span style={{ fontSize: '12px', color: '#00e5ff', display: 'flex', alignItems: 'center' }}>🟦 RELATIVE ROTATION GRAPH (RRG)</span>
+                            {/* Small re-upload trigger if data exists */}
+                            {!isRrgLoading && rrgData.length > 0 && (
+                                <label style={{ cursor: 'pointer', fontSize: '10px', color: '#666', textDecoration: 'underline' }}>
+                                    (Tải lại CSV)
+                                    <input type="file" accept=".csv" onChange={handleFileUpload} style={{ display: 'none' }} />
+                                </label>
+                            )}
+                        </div>
+
+                        {isRrgLoading && rrgData.length === 0 ? ( // Only show loading if no data and still loading
+                            <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666', flexDirection: 'column' }}>
+                                <div style={{ marginBottom: '10px' }}>Loading RRG Data (Fetching 1 Year History)...</div>
+                                <div style={{ fontSize: '0.8em', color: '#444' }}>If this takes too long, please use the Upload button above.</div>
+                            </div>
+                        ) : (
+                            <Suspense fallback={<div>Loading RRG...</div>}>
                                 <Plot
-                                    data={[{
-                                        domain: { x: [0, 1], y: [0, 1] },
-                                        value: sentiment.market_score + 0.5, // Offset simple
-                                        // Remove title from here to prevent overlap
-                                        type: "indicator",
-                                        mode: "gauge", // Removed "+number" to hide the offset value
-                                        gauge: {
-                                            axis: { range: [-1, 1], visible: false }, // Hide axis numbers if needed, or keep for context
-                                            bar: { color: sentiment.market_color },
-                                            steps: [
-                                                { range: [-1, -0.1], color: "rgba(255, 23, 68, 0.3)" },
-                                                { range: [-0.1, 0.1], color: "rgba(255, 215, 0, 0.3)" },
-                                                { range: [0.1, 1], color: "rgba(0, 230, 118, 0.3)" }
-                                            ],
-                                            threshold: {
-                                                line: { color: "white", width: 4 },
-                                                thickness: 0.75,
-                                                value: sentiment.market_score
-                                            }
+                                    data={[
+                                        {
+                                            x: rrgData.map(d => d.x),
+                                            y: rrgData.map(d => d.y),
+                                            text: rrgData.map(d => d.ticker),
+                                            mode: 'text+markers',
+                                            textposition: 'top center',
+                                            marker: {
+                                                size: 12,
+                                                color: rrgData.map(d => {
+                                                    if (d.x > 100 && d.y > 100) return '#00e676'; // Leading Green
+                                                    if (d.x < 100 && d.y > 100) return '#2979ff'; // Improving Blue
+                                                    if (d.x < 100 && d.y < 100) return '#ff1744'; // Lagging Red
+                                                    return '#ffea00'; // Weakening Yellow
+                                                }),
+                                                line: { width: 1, color: 'white' }
+                                            },
+                                            type: 'scatter',
+                                            hoverinfo: 'text+x+y'
                                         }
-                                    }]}
+                                    ]}
                                     layout={{
-                                        width: 300,
-                                        height: 180, // Reduced height slightly
-                                        margin: { t: 20, b: 0, l: 30, r: 30 }, // Added top margin
+                                        autosize: true,
+                                        margin: { t: 50, r: 20, l: 40, b: 40 },
+                                        xaxis: { title: 'RS-Ratio (Trend)', zeroline: false, gridcolor: '#333', range: [90, 110] }, // Fixed range or auto
+                                        yaxis: { title: 'RS-Momentum (Speed)', zeroline: false, gridcolor: '#333', range: [90, 110] },
                                         paper_bgcolor: "rgba(0,0,0,0)",
-                                        font: { color: "white" }
+                                        plot_bgcolor: "rgba(0,0,0,0)",
+                                        font: { color: "#ddd" },
+                                        shapes: [
+                                            { type: 'line', x0: 100, x1: 100, y0: 0, y1: 200, line: { color: 'white', width: 1, dash: 'dot' } },
+                                            { type: 'line', x0: 0, x1: 200, y0: 100, y1: 100, line: { color: 'white', width: 1, dash: 'dot' } }
+                                        ],
+                                        annotations: [
+                                            { x: 105, y: 105, text: "LEADING (Dẫn dắt) 🟢", showarrow: false, font: { color: "#00e676", size: 14 }, opacity: 0.5 },
+                                            { x: 95, y: 105, text: "IMPROVING (Cải thiện) 🔵", showarrow: false, font: { color: "#2979ff", size: 14 }, opacity: 0.5 },
+                                            { x: 95, y: 95, text: "LAGGING (Tụt hậu) 🔴", showarrow: false, font: { color: "#ff1744", size: 14 }, opacity: 0.5 },
+                                            { x: 105, y: 95, text: "WEAKENING (Suy yếu) 🟡", showarrow: false, font: { color: "#ffea00", size: 14 }, opacity: 0.5 }
+                                        ]
                                     }}
+                                    useResizeHandler={true}
+                                    style={{ width: '100%', height: '100%' }}
                                     config={{ displayModeBar: false }}
                                 />
                             </Suspense>
-                            <div style={{ textAlign: 'center', marginTop: '-40px', fontSize: '2.5em', fontWeight: 'bold', color: sentiment.market_color }}>
-                                {sentiment.market_score}
-                            </div>
-                        </div>
-                    ) : <p>Loading Sentiment...</p>}
-                </div>
+                        )}
 
-                {/* TOP 3 CARDS */}
-                <div style={{ flex: 2, display: "flex", gap: "10px", flexDirection: "column" }}>
-                    <h3 style={sectionTitle}>🔥 Top Leaders (Sector Flow)</h3>
-                    <div style={{ display: "flex", gap: "15px", flexWrap: "wrap" }}>
-                        {sentiment && sentiment.top_movers.map((item, idx) => (
-                            <div key={idx} style={{
-                                ...cardStyle,
-                                borderLeft: `5px solid ${item.score > 0.3 ? '#00e676' : '#ffd700'}`,
-                                display: "flex", flexDirection: "column", justifyContent: "center"
-                            }}>
-                                <div style={{ fontSize: "24px", fontWeight: "bold", marginBottom: "5px" }}>{item.ticker}</div>
-                                <div style={{ fontSize: "14px", color: "#aaa" }}>NTF Score</div>
-                                <div style={{ fontSize: "28px", fontWeight: "bold", color: item.score > 0 ? "#00e676" : "#ff1744" }}>
-                                    {item.score}
-                                </div>
-                                <div style={{ marginTop: "10px", padding: "5px 10px", borderRadius: "4px", backgroundColor: item.score > 0.3 ? "rgba(0,230,118,0.2)" : "rgba(255,215,0,0.2)", color: item.score > 0.3 ? "#00e676" : "#ffd700", fontWeight: "bold" }}>
-                                    {item.action}
-                                </div>
-                            </div>
-                        ))}
-                        {!sentiment && <p>Scanning Market...</p>}
+                        <div style={{ position: 'absolute', bottom: '10px', right: '10px', fontSize: '10px', color: '#666' }}>
+                            {marketError ? "Source: Manual Upload" : "Source: VCI/VNStock Engine v2"}
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            {/* ROW 2: RRG & FUNDAMENTALS */}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "20px" }}>
-
-                {/* RRG CHART */}
-                <div style={{ ...cardStyle, flex: 2, minHeight: "500px" }}>
-                    <h3 style={{ ...sectionTitle, display: 'flex', justifyContent: 'space-between' }}>
-                        <span>🔄 Relative Rotation Graph (RRG)</span>
-                        <span style={{ fontSize: '12px', color: '#666' }}>*Benchmark: VN-Index</span>
-                    </h3>
-
-                    {rrgData.length > 0 ? (
-                        <Suspense fallback={<div>Loading Graph...</div>}>
-                            <Plot
-                                data={[
-                                    {
-                                        x: rrgData.map(d => d.x),
-                                        y: rrgData.map(d => d.y),
-                                        text: rrgData.map(d => d.ticker + " (" + d.quadrant + ")"),
-                                        mode: 'markers+text',
-                                        textposition: 'top center',
-                                        marker: {
-                                            size: 12,
-                                            color: rrgData.map(d => d.x > 100 && d.y > 100 ? '#00e676' : d.x < 100 && d.y < 100 ? '#ff1744' : '#ffd700'),
-                                            opacity: 0.8
-                                        },
-                                        type: 'scatter'
-                                    }
-                                ]}
-                                layout={{
-                                    autosize: true,
-                                    height: 450,
-                                    margin: { l: 50, r: 50, b: 50, t: 20 },
-                                    paper_bgcolor: "rgba(0,0,0,0)",
-                                    plot_bgcolor: "rgba(255,255,255,0.05)",
-                                    font: { color: "#e0e0e0" },
-                                    xaxis: {
-                                        title: "Relative Strength (RS-Ratio)",
-                                        gridcolor: "#333",
-                                        zerolinecolor: "#666",
-                                        range: [80, 120] // Auto-range better usually but lets center 100
-                                    },
-                                    yaxis: {
-                                        title: "Momentum (RS-Momentum)",
-                                        gridcolor: "#333",
-                                        zerolinecolor: "#666",
-                                        range: [90, 110]
-                                    },
-                                    shapes: [
-                                        // Quadrant Lines
-                                        { type: 'line', x0: 100, x1: 100, y0: 0, y1: 200, line: { color: 'gray', dash: 'dot' } },
-                                        { type: 'line', x0: 0, x1: 200, y0: 100, y1: 100, line: { color: 'gray', dash: 'dot' } }
-                                    ],
-                                    annotations: [
-                                        { x: 110, y: 105, text: "LEADING (Dẫn dắt) 🟢", showarrow: false, font: { color: "#00e676", size: 14, weight: "bold" } },
-                                        { x: 90, y: 105, text: "IMPROVING (Cải thiện) 🔵", showarrow: false, font: { color: "#2979ff" } },
-                                        { x: 90, y: 95, text: "LAGGING (Tụt hậu) 🔴", showarrow: false, font: { color: "#ff1744" } },
-                                        { x: 110, y: 95, text: "WEAKENING (Suy yếu) 🟡", showarrow: false, font: { color: "#ffea00" } }
-                                    ]
-                                }}
-                                config={{ responsive: true, displayModeBar: false }}
-                                style={{ width: "100%", height: "100%" }}
-                            />
-                        </Suspense>
-                    ) : (
-                        <div style={{ padding: "50px", color: "#666" }}>Loading RRG Data (Fetching 1 Year History)...</div>
-                    )}
-                </div>
-
-                {/* FUNDAMENTALS CHECK */}
-                <div style={{ ...cardStyle, flex: 1 }}>
-                    <h3 style={sectionTitle}>📊 Fundamental Snapshot</h3>
+                {/* 2. SIDEBAR PANELS */}
+                <div style={{ ...cardStyle, flex: 1, textAlign: 'left', padding: '15px', background: '#1e1e1e', border: '1px solid #333', boxShadow: '0 4px 20px rgba(0,0,0,0.5)' }}>
+                    <h3 style={{ ...sectionTitle, marginBottom: '10px', color: '#00e5ff' }}>📊 Fundamental Snapshot</h3>
                     <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
                         <input
                             value={fundTicker}
