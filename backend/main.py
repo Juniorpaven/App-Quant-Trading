@@ -379,22 +379,34 @@ def get_data(tickers, period="5y"):
     
     try:
         # Batch download is extremely fast (1 request for all)
-        data = yf.download(yf_tickers, period=period, progress=False, auto_adjust=False)['Adj Close']
+        # Using auto_adjust=True to get 'Close' which accounts for splits (standard practice now)
+        data_raw = yf.download(yf_tickers, period=period, progress=False, auto_adjust=True)
         
-        # If single ticker result (Series), convert to DataFrame
+        # Robustly select the price column
+        # Recent yf versions with auto_adjust=True return 'Close'
+        # Older versions or auto_adjust=False return 'Adj Close'
+        target_col = None
+        if 'Close' in data_raw.columns:
+            target_col = 'Close'
+        elif 'Adj Close' in data_raw.columns:
+             target_col = 'Adj Close'
+             
+        if target_col:
+            data = data_raw[target_col]
+        else:
+            # Fallback for single ticker or unexpected structure
+            data = data_raw
+        
+        # If single ticker result (Series), convert to DataFrame with proper name
         if isinstance(data, pd.Series):
             data = data.to_frame(name=yf_tickers[0])
             
         # Data Cleaning
         data = data.dropna(axis=1, how='all')
-        if data.empty: return data
+        if data.empty: return pd.DataFrame() # Return empty DF if no data
         
         # Forward Fill & Drop NaN
         data = data.ffill().dropna()
-        
-        # Normalize column names (remove .VN for internal logic if needed? 
-        # Actually existing logic expects .VN mostly, but RRG might want simple names.
-        # Let's keep .VN to match the provided list format)
         
         return data
         
