@@ -178,8 +178,37 @@ const CommandCenter = () => {
                 </div>
             )}
 
+            {/* DEBUG VIEW (COLLAPSIBLE) */}
+            <details style={{ marginBottom: '20px', padding: '10px', backgroundColor: '#333', borderRadius: '8px', cursor: 'pointer' }}>
+                <summary style={{ color: '#ccc', fontSize: '0.9em' }}>🕵️ Kỹ thuật viên: Soi dữ liệu gốc (Debug)</summary>
+                <div style={{ marginTop: '10px', overflowX: 'auto', backgroundColor: '#222', padding: '10px', borderRadius: '4px' }}>
+                    {rrgData.length > 0 ? (
+                        <table style={{ width: '100%', fontSize: '0.8em', color: '#aaa', borderCollapse: 'collapse' }}>
+                            <thead>
+                                <tr style={{ borderBottom: '1px solid #444' }}>
+                                    <th style={{ textAlign: 'left', padding: '5px' }}>Ticker</th>
+                                    <th style={{ textAlign: 'left', padding: '5px' }}>RS-Ratio</th>
+                                    <th style={{ textAlign: 'left', padding: '5px' }}>RS-Momentum</th>
+                                    <th style={{ textAlign: 'left', padding: '5px' }}>Group</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {rrgData.slice(0, 5).map((d, i) => (
+                                    <tr key={i} style={{ borderBottom: '1px solid #333' }}>
+                                        <td style={{ padding: '5px' }}>{d.ticker}</td>
+                                        <td style={{ padding: '5px', color: d.x > 100 ? '#00e676' : '#ff1744' }}>{d.x.toFixed(2)}</td>
+                                        <td style={{ padding: '5px', color: d.y > 100 ? '#00e676' : '#ff1744' }}>{d.y.toFixed(2)}</td>
+                                        <td style={{ padding: '5px' }}>{d.group}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    ) : <p style={{ color: '#666', fontSize: '0.8em' }}>Chưa có dữ liệu. Hãy nạp file CSV.</p>}
+                </div>
+            </details>
+
             {/* Main Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', height: '85vh' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', minHeight: '85vh', alignContent: 'start' }}>
 
                 {/* 1. CHART AREA (RRG) - SPANS 2 COLUMNS */}
                 <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '20px' }}>
