@@ -99,41 +99,30 @@ const CommandCenter = () => {
             const data = [];
             const foundGroups = new Set();
 
-            // AUTO DETECT CSV STRUCTURE
-            // Check first line to see if it has header "Unnamed: 0" or just standard cols
-            // If the first real data line starts with an integer index, we skip col 0.
-            const firstDataLine = lines.length > 1 ? lines[1].split(',') : [];
-            let hasIndexCol = false;
-
-            // Heuristic Not perfect but good enough: 
-            // If first column is integer-like (index) AND second column is string (Ticker), we likely have an index
-            if (firstDataLine.length > 2 && !isNaN(parseInt(firstDataLine[0])) && isNaN(parseFloat(firstDataLine[1]))) {
-                hasIndexCol = true;
-            }
-
+            // PARSE CSV based on user's exact format:
+            // Ticker,Group,RS_Ratio,RS_Momentum
             for (let i = 1; i < lines.length; i++) {
                 const line = lines[i].trim();
                 if (!line) continue;
                 const parts = line.split(',');
 
-                // Index offset: If index col exists, shift everything by 1
-                const offset = hasIndexCol ? 1 : 0;
+                if (parts.length >= 4) {
+                    // Mapping based on provided sample:
+                    // 0: Ticker
+                    // 1: Group
+                    // 2: RS_Ratio
+                    // 3: RS_Momentum
 
-                if (parts.length >= 3 + offset) {
-                    const ticker = parts[0 + offset];
-                    // Clean ticker just in case
-                    const cleanTicker = ticker.replace(/["']/g, "").trim();
+                    const ticker = parts[0].replace(/["']/g, "").trim();
+                    const group = parts[1].replace(/["']/g, "").trim();
+                    const ratio = parseFloat(parts[2]);
+                    const mom = parseFloat(parts[3]);
 
-                    const ratio = parseFloat(parts[1 + offset]);
-                    const mom = parseFloat(parts[2 + offset]);
-                    let group = "Unclassified";
-                    if (parts.length > 3 + offset) {
-                        group = parts[3 + offset].replace(/[\r\n"']/g, "").trim();
-                    }
+                    if (isNaN(ratio) || isNaN(mom)) continue; // Skip bad rows
 
                     foundGroups.add(group);
 
-                    // RE-CALCULATE QUADRANT for display accuracy
+                    // RE-CALCULATE QUADRANT
                     let resultQuad = "Unknown";
                     if (ratio > 100 && mom > 100) resultQuad = "Leading (Dẫn dắt) 🟢";
                     else if (ratio > 100 && mom < 100) resultQuad = "Weakening (Suy yếu) 🟡";
@@ -141,7 +130,7 @@ const CommandCenter = () => {
                     else resultQuad = "Improving (Cải thiện) 🔵";
 
                     data.push({
-                        ticker: cleanTicker,
+                        ticker: ticker,
                         x: ratio,
                         y: mom,
                         group: group,
