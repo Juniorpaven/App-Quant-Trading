@@ -17,12 +17,38 @@ const CommandCenter = () => {
     const [marketError, setMarketError] = useState(false);
     const [leaders, setLeaders] = useState([]);
 
+    // Chart & Mobile State
+    const [chartData, setChartData] = useState(null);
+    const [isChartLoading, setIsChartLoading] = useState(false);
+    const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+
     const isManualMode = React.useRef(false); // Flag to prevent API overwrites
 
     useEffect(() => {
         fetchSentiment();
         fetchRRG();
+
+        const handleResize = () => setIsMobile(window.innerWidth < 768);
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
     }, []);
+
+    const fetchChart = async (ticker) => {
+        setIsChartLoading(true);
+        try {
+            const res = await axios.post(`${API_URL}/api/dashboard/chart`, { ticker });
+            if (res.data.data) {
+                setChartData(res.data.data);
+            } else {
+                console.error("Chart error:", res.data.error);
+                setChartData(null);
+            }
+        } catch (e) {
+            console.error("Chart fetch error", e);
+            setChartData(null);
+        }
+        setIsChartLoading(false);
+    };
 
     const fetchSentiment = async () => {
         try {
@@ -76,6 +102,7 @@ const CommandCenter = () => {
     const checkFundamentals = async () => {
         if (!fundTicker) return;
         setLoadingFund(true);
+        fetchChart(fundTicker); // Auto fetch chart
         try {
             const res = await axios.post(`${API_URL}/api/dashboard/fundamentals`, { ticker: fundTicker });
             setFundData(res.data.data);
@@ -224,7 +251,7 @@ const CommandCenter = () => {
             {/* ... Header ... */}
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: '20px' }}>
                 <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#00e676', marginRight: '10px', boxShadow: '0 0 10px #00e676' }}></div>
-                <h2 style={{ margin: 0, fontSize: '1.2em', letterSpacing: '2px', textTransform: 'uppercase', color: '#00e676' }}>🛡️ QUANT COCKPIT - TITAN MODE</h2>
+                <h2 style={{ margin: 0, fontSize: isMobile ? '1em' : '1.2em', letterSpacing: '2px', textTransform: 'uppercase', color: '#00e676' }}>🛡️ QUANT COCKPIT - TITAN MODE</h2>
             </div>
 
             {/* ERROR / FALLBACK UI - ALWAYS SHOW IF NO DATA */}
@@ -283,16 +310,16 @@ const CommandCenter = () => {
             </details>
 
             {/* Main Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', minHeight: '85vh', alignContent: 'start' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: '20px', minHeight: '85vh', alignContent: 'start' }}>
 
                 {/* 1. CHART AREA (RRG) - SPANS 2 COLUMNS */}
-                <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                <div style={{ gridColumn: isMobile ? 'span 1' : 'span 2', display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
                     {/* MARKET PULSE HEADER (REIMAGINED) */}
                     {sentiment && (
                         <div style={{
                             display: 'grid',
-                            gridTemplateColumns: '1fr 1fr',
+                            gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
                             gap: '20px',
                             padding: '15px',
                             backgroundColor: '#1e1e1e',
@@ -336,7 +363,7 @@ const CommandCenter = () => {
                             </div>
 
                             {/* RIGHT: TOP LEADERS */}
-                            <div style={{ borderLeft: '1px solid #444', paddingLeft: '20px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                            <div style={{ borderLeft: isMobile ? 'none' : '1px solid #444', borderTop: isMobile ? '1px solid #444' : 'none', paddingLeft: isMobile ? 0 : '20px', paddingTop: isMobile ? '15px' : 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                                 <div style={{ fontSize: '10px', color: '#ff9800', marginBottom: '10px' }}>🔥 TOP LEADERS (SECTOR FLOW)</div>
                                 <div style={{ display: 'flex', gap: '10px' }}>
                                     {leaders.length > 0 ? leaders.map((l, i) => (
@@ -548,7 +575,30 @@ const CommandCenter = () => {
                     )}
                 </div>
             </div>
-        </div>
+            {/* 3. NEW FULL WIDTH CHART SECTION */}
+            {/* 3. NEW FULL WIDTH CHART SECTION */}
+            <div style={{ marginTop: '20px', padding: '20px', backgroundColor: '#1e1e1e', borderRadius: '12px', border: '1px solid #333' }}>
+                <h3 style={{ color: '#00e5ff', fontSize: '1.2em', marginBottom: '15px' }}>📈 SMART CHART + VOLUME PROFILE (POC)</h3>
+                <div style={{ minHeight: '500px' }}>
+                    {isChartLoading ? (
+                        <div style={{ color: '#888', textAlign: 'center', padding: '50px' }}>Loading Chart for {fundTicker}...</div>
+                    ) : chartData ? (
+                        <Suspense fallback={<div>Loading Chart...</div>}>
+                            <Plot
+                                data={chartData.data}
+                                layout={{ ...chartData.layout, autosize: true, height: 600, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)" }}
+                                useResizeHandler={true}
+                                style={{ width: '100%', height: '100%' }}
+                            />
+                        </Suspense>
+                    ) : (
+                        <div style={{ color: '#666', textAlign: 'center', padding: '50px' }}>
+                            Nhập mã CK vào ô 'Fundamental Snapshot' và bấm CHECK để xem biểu đồ Volume Profile.
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div >
     );
 };
 
