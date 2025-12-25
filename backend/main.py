@@ -452,28 +452,81 @@ def plot_candlestick_with_vp(df, ticker_name):
 class ChartRequest(BaseModel):
     ticker: str
 
+def get_ohlcv_smart(ticker, period="1y"):
+    """
+    Fetch OHLCV data using Yahoo Finance first, fallback to Vnstock if failed.
+    Returns: DataFrame with index=Date, columns=[Open, High, Low, Close, Volume]
+    """
+    # 1. Try Yahoo Finance
+    yf_ticker = ticker.strip().upper()
+    if "-" not in yf_ticker and "^" not in yf_ticker and ".VN" not in yf_ticker:
+        yf_ticker += ".VN"
+        
+    print(f"Chart: Fetching {yf_ticker} via Yahoo...")
+    try:
+        df = yf.download(yf_ticker, period=period, progress=False, auto_adjust=True)
+        # Handle MultiIndex
+        if isinstance(df.columns, pd.MultiIndex):
+             # Try to get the ticker level if it exists
+            if yf_ticker in df.columns.get_level_values(1):
+                 df = df.xs(yf_ticker, level=1, axis=1)
+            elif yf_ticker.replace('.VN', '') in df.columns.get_level_values(1):
+                 df = df.xs(yf_ticker.replace('.VN', ''), level=1, axis=1)
+        
+        # Check basic columns
+        required = ['Open', 'High', 'Low', 'Close', 'Volume']
+        if not df.empty and all(col in df.columns for col in required):
+            print("Chart: Yahoo Success.")
+            return df[required]
+    except Exception as e:
+        print(f"Chart: Yahoo failed: {e}")
+
+    # 2. Fallback to Vnstock
+    vn_ticker = ticker.replace(".VN", "").strip().upper()
+    print(f"Chart: Fallback to Vnstock for {vn_ticker}...")
+    try:
+        from vnstock import Vnstock
+        # Period mapping
+        days = 365
+        if period == "1y": days = 365
+        elif period == "2y": days = 730
+        
+        end_date = datetime.now().strftime('%Y-%m-%d')
+        start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+        
+        stock = Vnstock().stock(symbol=vn_ticker, source='VCI')
+        df = stock.quote.history(symbol=vn_ticker, start=start_date, end=end_date)
+        
+        if df is not None and not df.empty:
+            # Vnstock cols: time, open, high, low, close, volume
+            df = df.rename(columns={
+                'time': 'Date', 'open': 'Open', 'high': 'High', 
+                'low': 'Low', 'close': 'Close', 'volume': 'Volume'
+            })
+            df = df.set_index('Date')
+            df.index = pd.to_datetime(df.index)
+            # Ensure numeric
+            cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+            for c in cols: df[c] = pd.to_numeric(df[c])
+            
+            print("Chart: Vnstock Success.")
+            return df[cols]
+            
+    except Exception as e:
+        print(f"Chart: Vnstock failed: {e}")
+        
+    return pd.DataFrame()
+
 @app.post("/api/dashboard/chart")
 def get_chart_data(req: ChartRequest):
     try:
-        ticker = req.ticker.strip().upper()
-        if "-" not in ticker and "^" not in ticker and ".VN" not in ticker:
-            ticker += ".VN"
-            
-        # Get historical data (1 year)
-        # Note: We use yf directly to get OHLCV, separate from RRG cache
-        df = yf.download(ticker, period="1y", progress=False, auto_adjust=True)
+        df = get_ohlcv_smart(req.ticker)
         
-        # Check if MultiIndex columns (common in new yfinance)
-        if isinstance(df.columns, pd.MultiIndex):
-             # Keep only the ticker level
-             df = df.xs(ticker, level=1, axis=1) if ticker in df.columns.get_level_values(1) else df
-        
-        # Reset index to make 'Date' a column if needed, or keep as index for plotting
         if df.empty:
-             return {"error": "No data found"}
+             return {"error": "No data found via Yahoo or Vnstock"}
              
         # Plot
-        fig = plot_candlestick_with_vp(df, ticker)
+        fig = plot_candlestick_with_vp(df, req.ticker.upper())
         
         # Convert to JSON for frontend
         return {"data": json.loads(fig.to_json())}
