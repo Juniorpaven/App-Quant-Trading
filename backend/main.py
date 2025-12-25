@@ -355,55 +355,135 @@ def get_vnstock_fundamentals(ticker):
         print(f"VNStock Error for {ticker}: {e}")
         return {"pe": 0, "roe": 0, "eps": 0, "pb": 0, "source": "Error"}
 
+# --- VOLUME PROFILE & CHARTING ---
+import plotly.graph_objects as go
+import json
 
-def get_data_vnstock_sequential(tickers, period="1y"):
+def calculate_volume_profile(df, price_col='Close', vol_col='Volume', bins=50):
     """
-    Fallback data fetcher using Vnstock (Sequential) to avoid IP blocking.
-    Slow but reliable.
+    Tính toán Volume Profile từ dữ liệu nến OHLCV (Dạng ước lượng)
     """
-    from vnstock import Vnstock
-    import pandas as pd
-    import time
+    if len(df) < 2: return pd.DataFrame(), 0
+
+    # 1. Xác định biên độ giá toàn bộ giai đoạn
+    min_price = df['Low'].min()
+    max_price = df['High'].max()
     
-    # Calculate start date based on period
-    days = 365
-    if period == "6mo": days = 180
-    elif period == "3mo": days = 90
-    elif period == "2y": days = 365*2
-    elif period == "5y": days = 365*5
+    # 2. Chia nhỏ mức giá thành các giỏ (bins)
+    price_range = np.linspace(min_price, max_price, bins)
     
-    end_date = datetime.now().strftime('%Y-%m-%d')
-    start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+    # 3. Tính tổng volume cho từng mức giá
+    # Logic: Phân bổ volume của cây nến vào các bin giá mà cây nến đó đi qua
+    # Cách đơn giản hóa: Histogram của Close Price weighted by Volume
     
-    result_dict = {}
-    print(f"Fallback: Fetching {len(tickers)} tickers sequentially via Vnstock...")
+    # Ensure Series are numpy arrays/lists for histogram
+    close_prices = df[price_col].values
+    volumes = df[vol_col].values
     
-    for t in tickers:
-        try:
-            # Map Yahoo format to Vnstock format
-            clean = t.strip().upper()
-            if clean == "^VNINDEX": clean = "VNINDEX"
-            clean = clean.replace(".VN", "")
+    hist, bin_edges = np.histogram(close_prices, bins=price_range, weights=volumes)
+    
+    # 4. Tìm POC (Point of Control) - Mức giá có Volume lớn nhất
+    max_vol_idx = hist.argmax()
+    poc_price = (bin_edges[max_vol_idx] + bin_edges[max_vol_idx+1]) / 2
+    
+    # 5. Tạo DataFrame kết quả
+    vp_df = pd.DataFrame({
+        'Price_Low': bin_edges[:-1],
+        'Price_High': bin_edges[1:],
+        'Volume': hist
+    })
+    vp_df['Price_Mid'] = (vp_df['Price_Low'] + vp_df['Price_High']) / 2
+    
+    return vp_df, poc_price
+
+def plot_candlestick_with_vp(df, ticker_name):
+    # Tính VP
+    vp_df, poc_price = calculate_volume_profile(df)
+    
+    # Tạo biểu đồ chính (Nến)
+    fig = go.Figure()
+    
+    # 1. Vẽ Nến
+    fig.add_trace(go.Candlestick(
+        x=df.index,
+        open=df['Open'], high=df['High'],
+        low=df['Low'], close=df['Close'],
+        name=f'{ticker_name} Price'
+    ))
+    
+    # 2. Vẽ Volume Profile (Nằm ngang bên phải)
+    # Hack: Vẽ bằng Scatter line để tạo hiệu ứng thanh ngang hoặc Bar chart trục ngang
+    # Tuy nhiên, để đơn giản và đẹp trên Web, ta sẽ dùng Shapes hoặc Bar orientation='h'
+    # Lưu ý: Bar h cần trục y là giá, trục x là volume. 
+    # Nhưng chart nến đang có trục x là thời gian.
+    # -> Cần 2 trục X (xaxis, xaxis2).
+    
+    # Setup layout với 2 trục X
+    fig.update_layout(
+        xaxis=dict(domain=[0, 0.75], title="Time"), # Chart nến chiếm 75%
+        xaxis2=dict(domain=[0.76, 1], title="Volume Profile", overlaying=False), # VP chiếm 24%
+        yaxis=dict(title="Price"),
+        template="plotly_dark",
+        height=600,
+        margin=dict(l=50, r=50, t=50, b=50),
+        legend=dict(x=0, y=1, orientation="h")
+    )
+    
+    # Vẽ VP Bar Chart ở trục phụ (xaxis2)
+    if not vp_df.empty:
+        fig.add_trace(go.Bar(
+            y=vp_df['Price_Mid'],
+            x=vp_df['Volume'],
+            orientation='h',
+            xaxis='xaxis2',
+            name='Volume Profile',
+            marker=dict(color='rgba(255, 255, 0, 0.3)', line=dict(width=0))
+        ))
+
+    # Vẽ POC (Đường kẻ ngang toàn chart)
+    fig.add_hline(y=poc_price, line_dash="dash", line_color="yellow", line_width=2, 
+                  annotation_text="POC", annotation_position="top right")
+
+    fig.update_layout(title=f"{ticker_name} - Price Action & POC Analysis")
+    
+    return fig
+
+# --- NEW API ENDPOINT FOR CHART ---
+class ChartRequest(BaseModel):
+    ticker: str
+
+@app.post("/api/dashboard/chart")
+def get_chart_data(req: ChartRequest):
+    try:
+        ticker = req.ticker.strip().upper()
+        if "-" not in ticker and "^" not in ticker and ".VN" not in ticker:
+            ticker += ".VN"
             
-            stock = Vnstock().stock(symbol=clean, source='VCI')
-            df = stock.quote.history(symbol=clean, start=start_date, end=end_date)
-            
-            if df is not None and not df.empty:
-                df = df.set_index('time')
-                df.index = pd.to_datetime(df.index)
-                series = df['close']
-                series.name = t # Keep original requested name
-                result_dict[t] = series
-            
-            # Small delay to be polite
-            time.sleep(0.0) 
-        except Exception as e:
-            print(f"Vnstock fallback error for {t}: {e}")
-            
-    if not result_dict:
-        return pd.DataFrame()
+        # Get historical data (1 year)
+        # Note: We use yf directly to get OHLCV, separate from RRG cache
+        df = yf.download(ticker, period="1y", progress=False, auto_adjust=True)
         
-    return pd.DataFrame(result_dict)
+        # Check if MultiIndex columns (common in new yfinance)
+        if isinstance(df.columns, pd.MultiIndex):
+             # Keep only the ticker level
+             df = df.xs(ticker, level=1, axis=1) if ticker in df.columns.get_level_values(1) else df
+        
+        # Reset index to make 'Date' a column if needed, or keep as index for plotting
+        if df.empty:
+             return {"error": "No data found"}
+             
+        # Plot
+        fig = plot_candlestick_with_vp(df, ticker)
+        
+        # Convert to JSON for frontend
+        return {"data": json.loads(fig.to_json())}
+        
+    except Exception as e:
+        print(f"Chart Error: {e}")
+        return {"error": str(e)}
+
+# --- DASHBOARD ENDPOINTS ---
+
 
 def get_data(tickers, period="5y"): 
     """
