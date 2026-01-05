@@ -17,8 +17,8 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          vendor: ['react', 'react-dom', 'axios', 'framer-motion'],
-          plotly: ['react-plotly.js', 'plotly.js-dist-min']
+          vendor: ['react', 'react-dom', 'axios'],
+          plotly: ['react-plotly.js', 'plotly.js']
         }
       }
     }
