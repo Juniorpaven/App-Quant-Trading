@@ -159,14 +159,125 @@ const CommandCenter = () => {
         setLoadingFund(false);
     };
 
-    // ... (Styles consts remain, omitting to save space in replacement, assume original styles exist or I copy them if needed. 
-    // Wait, replacing the whole file content is safer or I need to span carefully.
-    // The previous view_file was up to line 616. 
+    // --- STYLES ---
+    const containerStyle = {
+        padding: "20px",
+        backgroundColor: "#1a1a1a",
+        borderRadius: "15px",
+        marginBottom: "30px",
+        border: "1px solid #333",
+        boxShadow: "0 10px 30px rgba(0,0,0,0.5)"
+    };
 
-    // I will use replace_file_content targeted at the return block to inject IDs and function at top)
+    const headerStyle = {
+        color: "#00e5ff",
+        fontSize: "24px",
+        marginBottom: "20px",
+        textTransform: "uppercase",
+        letterSpacing: "2px",
+        borderBottom: "1px solid #444",
+        paddingBottom: "10px"
+    };
 
-    // RETURNING TO TARGETED REPLACEMENT STRATEGY
-    // I will insert imports first, then the function, then modify the return JSX.
+    const sectionTitle = {
+        color: "#aaa",
+        fontSize: "16px",
+        marginBottom: "15px",
+        textTransform: "uppercase"
+    };
+
+    const cardStyle = {
+        background: "linear-gradient(135deg, #2a2a2a 0%, #1e1e1e 100%)",
+        borderRadius: "12px",
+        padding: "20px",
+        textAlign: "center",
+        border: "1px solid #444",
+        flex: 1,
+        minWidth: "200px"
+    };
+
+
+    const [groups, setGroups] = useState([]);
+    const [selectedGroup, setSelectedGroup] = useState('ALL');
+
+    // --- RRG SNAPSHOT UPLOAD MODE ---
+    const handleFileUpload = (event) => {
+        isManualMode.current = true; // LOCK STATE: Prevent background API from overwriting
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const text = e.target.result;
+            const lines = text.split('\n').filter(l => l.trim());
+            const data = [];
+            const foundGroups = new Set();
+
+            // PARSE CSV based on user's exact format:
+            // Ticker,Group,RS_Ratio,RS_Momentum
+            for (let i = 1; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) continue;
+                const parts = line.split(',');
+
+                if (parts.length >= 4) {
+                    const ticker = parts[0].replace(/["']/g, "").trim();
+                    const group = parts[1].replace(/["']/g, "").trim();
+                    const ratio = parseFloat(parts[2]);
+                    const mom = parseFloat(parts[3]);
+
+                    if (isNaN(ratio) || isNaN(mom)) continue; // Skip bad rows
+
+                    foundGroups.add(group);
+
+                    data.push({
+                        ticker: ticker,
+                        x: ratio,
+                        y: mom,
+                        group: group
+                    });
+                }
+            }
+
+            // UPDATE STATE
+            setRrgData(data);
+            setGroups(['ALL', ...Array.from(foundGroups).sort()]);
+            setIsRrgLoading(false);
+            setMarketError(false);
+
+            // --- AUTO CALCULATE TOP LEADERS ---
+            // Find stocks in Leading quadrant (x>100, y>100), sort by distance from center (strength)
+            const leaders = data
+                .filter(d => d.x > 100 && d.y > 100)
+                .sort((a, b) => (b.x + b.y) - (a.x + a.y)) // Simple sort by sum of scores
+                .slice(0, 5) // Top 5
+                .map(d => d.ticker);
+
+            setLeaders(leaders);
+
+            // --- AUTO RESTORE MARKET PULSE ---
+            // Calculate a synthetic market score based on % of stocks above 100 RS-Ratio
+            const bullishCount = data.filter(d => d.x > 100).length;
+            const score = (bullishCount / data.length) * 2 - 1; // Map 0..1 to -1..1
+
+            let status = "SIDEWAYS";
+            let color = "white";
+            if (score > 0.2) { status = "BULLISH"; color = "#00e676"; }
+            else if (score < -0.2) { status = "BEARISH"; color = "#ff1744"; }
+
+            setSentiment({
+                market_status: status,
+                market_score: parseFloat(score.toFixed(2)),
+                market_color: color
+            });
+        };
+        reader.readAsText(file);
+    };
+
+    // Filter RRG Data based on selection
+    const filteredRrgData = selectedGroup === 'ALL'
+        ? rrgData
+        : rrgData.filter(d => d.group === selectedGroup);
     return (
         <div style={{ padding: '20px', backgroundColor: '#121212', minHeight: '100vh', color: 'white', fontFamily: 'Inter, sans-serif' }}>
             {/* ... Header ... */}
