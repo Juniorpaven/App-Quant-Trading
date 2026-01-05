@@ -333,7 +333,32 @@ const CommandCenter = () => {
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: '20px', minHeight: '85vh', alignContent: 'start' }}>
 
                 {/* 1. CHART AREA (RRG) - SPANS 2 COLUMNS */}
-                <div style={{ gridColumn: isMobile ? 'span 1' : 'span 2', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                <div id="market-rrg-combined-section" style={{ gridColumn: isMobile ? 'span 1' : 'span 2', display: 'flex', flexDirection: 'column', gap: '20px', position: 'relative' }}>
+
+                    {/* EXPORT BUTTON FOR COMBINED SECTION */}
+                    <button
+                        onClick={() => exportToImage('market-rrg-combined-section', 'Market_Scanner_RRG')}
+                        style={{
+                            position: 'absolute',
+                            top: '-15px',
+                            right: '0px',
+                            background: '#222',
+                            border: '1px solid #444',
+                            borderRadius: '50%',
+                            width: '35px',
+                            height: '35px',
+                            cursor: 'pointer',
+                            fontSize: '18px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            boxShadow: '0 2px 5px rgba(0,0,0,0.5)',
+                            zIndex: 100
+                        }}
+                        title="Chụp ảnh toàn bộ (Market + RRG)"
+                    >
+                        📸
+                    </button>
 
                     {/* MARKET PULSE HEADER (REIMAGINED) */}
                     {sentiment && (
@@ -348,7 +373,7 @@ const CommandCenter = () => {
                             boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
                             position: 'relative'
                         }}>
-                            <button onClick={() => exportToImage('market-pulse-section', 'Market_Pulse_RRG_Leaders')} style={{ position: 'absolute', top: '10px', right: '10px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '16px' }} title="Export Image">📸</button>
+                            {/* Button removed from here */}
 
                             {/* LEFT: SENTIMENT */}
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px' }}>
