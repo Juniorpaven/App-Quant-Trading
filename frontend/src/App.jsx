@@ -1,6 +1,7 @@
 
 import { useState, useRef } from 'react'
 import axios from 'axios'
+import html2canvas from 'html2canvas'; // Import html2canvas
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -29,6 +30,26 @@ ChartJS.register(
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 function App() {
+  const exportToImage = async (elementId, fileName) => {
+    const element = document.getElementById(elementId);
+    if (!element) return;
+    try {
+      const canvas = await html2canvas(element, {
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: '#2a2a2a' // Dark background matching card style
+      });
+      const image = canvas.toDataURL("image/jpeg", 1.0);
+      const link = document.createElement('a');
+      link.href = image;
+      link.download = `${fileName}_${new Date().toISOString().slice(0, 10)}.jpg`;
+      link.click();
+    } catch (err) {
+      console.error("Export failed:", err);
+      alert("Lỗi xuất ảnh: " + err.message);
+    }
+  };
+
   const [status, setStatus] = useState("");
 
   // State NTF
@@ -217,7 +238,8 @@ function App() {
 
         {/* COLUMN 1: MARKET SCAN (NTF) */}
         <div style={columnStyle}>
-          <div style={{ ...cardStyle, height: "100%" }}>
+          <div id="ntf-section" style={{ ...cardStyle, height: "100%", position: 'relative' }}>
+            <button onClick={() => exportToImage('ntf-section', 'NTF_Analysis')} style={{ position: 'absolute', top: '10px', right: '10px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '20px' }} title="Export Image">📸</button>
             <h2>🌐 Network Trend Following</h2>
             <p style={{ fontSize: "0.85em", color: "#aaa" }}>Market Momentum Scanner</p>
 
@@ -271,7 +293,8 @@ function App() {
         <div style={columnStyle}>
 
           {/* AI ORACLE */}
-          <div style={{ ...cardStyle, borderLeft: "4px solid #e91e63" }}>
+          <div id="ai-section" style={{ ...cardStyle, borderLeft: "4px solid #e91e63", position: 'relative' }}>
+            <button onClick={() => exportToImage('ai-section', 'AI_Oracle')} style={{ position: 'absolute', top: '10px', right: '10px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '20px' }} title="Export Image">📸</button>
             <h2>🤖 AI Oracle</h2>
 
             <div style={inputGroup}>
@@ -428,7 +451,8 @@ function App() {
 
           {/* OPS RESULTS TABLE */}
           {opsResult && (
-            <div style={{ ...cardStyle, marginBottom: "15px" }}>
+            <div id="allocation-target-section" style={{ ...cardStyle, marginBottom: "15px", position: 'relative' }}>
+              <button onClick={() => exportToImage('allocation-target-section', 'Allocation_Target')} style={{ position: 'absolute', top: '10px', right: '10px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '20px' }} title="Export Image">📸</button>
               <h3 style={{ marginTop: 0, fontSize: "16px" }}>Allocation Target</h3>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "14px" }}>
                 <thead>
@@ -461,7 +485,7 @@ function App() {
       {/* FULL WIDTH: BACKTEST CHART */}
       {
         backtestResult && (
-          <div style={{ ...cardStyle, marginTop: "20px", width: "100%", boxSizing: "border-box" }}>
+          <div id="backtest-section" style={{ ...cardStyle, marginTop: "20px", width: "100%", boxSizing: "border-box" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
               <div>
                 <h3 style={{ marginTop: 0, fontSize: "18px", marginBottom: "5px" }}>Backtest Performance (5 Years)</h3>
@@ -470,12 +494,15 @@ function App() {
                 </div>
               </div>
 
-              <button
-                onClick={resetZoom}
-                style={{ ...btnStyle, width: "auto", padding: "5px 15px", fontSize: "12px", backgroundColor: "#555" }}
-              >
-                🔄 Reset Zoom
-              </button>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={() => exportToImage('backtest-section', 'Backtest_Performance')} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '20px' }} title="Export Image">📸</button>
+                <button
+                  onClick={resetZoom}
+                  style={{ ...btnStyle, width: "auto", padding: "5px 15px", fontSize: "12px", backgroundColor: "#555" }}
+                >
+                  🔄 Reset Zoom
+                </button>
+              </div>
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginBottom: "20px" }}>
