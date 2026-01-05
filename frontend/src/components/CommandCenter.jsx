@@ -36,10 +36,13 @@ const CommandCenter = () => {
     const [chartError, setChartError] = useState(null);
 
     const fetchChart = async (ticker) => {
+        console.log("fetchChart called with:", ticker);
         setIsChartLoading(true);
         setChartError(null);
         try {
+            console.log("Sending Axios request...");
             const res = await axios.post(`${API_URL}/api/dashboard/chart`, { ticker });
+            console.log("Axios response:", res.data);
             if (res.data.data) {
                 setChartData(res.data.data);
             } else {

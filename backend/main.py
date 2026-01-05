@@ -421,7 +421,7 @@ def plot_candlestick_with_vp(df, ticker_name):
     # Setup layout với 2 trục X
     fig.update_layout(
         xaxis=dict(domain=[0, 0.75], title="Time"), # Chart nến chiếm 75%
-        xaxis2=dict(domain=[0.76, 1], title="Volume Profile", overlaying=False), # VP chiếm 24%
+        xaxis2=dict(domain=[0.76, 1], title="Volume Profile"), # VP chiếm 24%
         yaxis=dict(title="Price"),
         template="plotly_dark",
         height=600,
@@ -435,7 +435,7 @@ def plot_candlestick_with_vp(df, ticker_name):
             y=vp_df['Price_Mid'],
             x=vp_df['Volume'],
             orientation='h',
-            xaxis='xaxis2',
+            xaxis='x2',
             name='Volume Profile',
             marker=dict(color='rgba(255, 255, 0, 0.3)', line=dict(width=0))
         ))
