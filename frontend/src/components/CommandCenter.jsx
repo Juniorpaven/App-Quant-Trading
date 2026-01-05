@@ -1,6 +1,40 @@
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, Suspense, Component } from 'react';
 import axios from 'axios';
 import html2canvas from 'html2canvas';
+
+// Validation for React existence to avoid Black Screen
+if (!React) {
+    console.error("FATAL: React is not defined!");
+}
+
+class ErrorBoundary extends Component {
+    constructor(props) {
+        super(props);
+        this.state = { hasError: false, error: null };
+    }
+
+    static getDerivedStateFromError(error) {
+        return { hasError: true, error };
+    }
+
+    componentDidCatch(error, errorInfo) {
+        console.error("ErrorBoundary caught error:", error, errorInfo);
+    }
+
+    render() {
+        if (this.state.hasError) {
+            return (
+                <div style={{ padding: '20px', color: '#ff1744', border: '1px solid #ff1744', borderRadius: '8px', background: 'rgba(255,23,68,0.1)' }}>
+                    <h3>⚠️ Component Error</h3>
+                    <p>{this.state.error?.message}</p>
+                    <button onClick={() => this.setState({ hasError: false })} style={{ padding: '5px 10px', background: '#333', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Retry</button>
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
+
 const Plot = React.lazy(() => import('react-plotly.js'));
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -215,28 +249,30 @@ const CommandCenter = () => {
 
                                 {/* Mini Gauge Chart */}
                                 <div style={{ width: '120px', height: '60px' }}>
-                                    <Suspense fallback={<div>...</div>}>
-                                        <Plot
-                                            data={[{
-                                                type: "indicator",
-                                                mode: "gauge",
-                                                value: sentiment.market_score + 1, // Shift range -1..1 to 0..2 for gauge
-                                                gauge: {
-                                                    axis: { range: [0, 2], visible: false },
-                                                    bar: { color: sentiment.market_color },
-                                                    bgcolor: "#333",
-                                                    borderwidth: 0,
-                                                    steps: [
-                                                        { range: [0, 0.9], color: "#444" }, // Red zone equivalent
-                                                        { range: [0.9, 1.1], color: "#555" },
-                                                        { range: [1.1, 2], color: "#666" }
-                                                    ]
-                                                }
-                                            }]}
-                                            layout={{ width: 120, height: 60, margin: { t: 0, b: 0, l: 0, r: 0 }, paper_bgcolor: "rgba(0,0,0,0)" }}
-                                            config={{ displayModeBar: false }}
-                                        />
-                                    </Suspense>
+                                    <ErrorBoundary>
+                                        <Suspense fallback={<div>...</div>}>
+                                            <Plot
+                                                data={[{
+                                                    type: "indicator",
+                                                    mode: "gauge",
+                                                    value: sentiment.market_score + 1, // Shift range -1..1 to 0..2 for gauge
+                                                    gauge: {
+                                                        axis: { range: [0, 2], visible: false },
+                                                        bar: { color: sentiment.market_color },
+                                                        bgcolor: "#333",
+                                                        borderwidth: 0,
+                                                        steps: [
+                                                            { range: [0, 0.9], color: "#444" }, // Red zone equivalent
+                                                            { range: [0.9, 1.1], color: "#555" },
+                                                            { range: [1.1, 2], color: "#666" }
+                                                        ]
+                                                    }
+                                                }]}
+                                                layout={{ width: 120, height: 60, margin: { t: 0, b: 0, l: 0, r: 0 }, paper_bgcolor: "rgba(0,0,0,0)" }}
+                                                config={{ displayModeBar: false }}
+                                            />
+                                        </Suspense>
+                                    </ErrorBoundary>
                                 </div>
                             </div>
 
@@ -308,53 +344,55 @@ const CommandCenter = () => {
                                 <div style={{ fontSize: '0.8em', color: '#444' }}>If this takes too long, please use the Upload button above.</div>
                             </div>
                         ) : (
-                            <Suspense fallback={<div>Loading RRG...</div>}>
-                                <Plot
-                                    data={[
-                                        {
-                                            x: filteredRrgData.map(d => d.x),
-                                            y: filteredRrgData.map(d => d.y),
-                                            text: filteredRrgData.map(d => d.ticker),
-                                            mode: 'text+markers',
-                                            textposition: 'top center',
-                                            marker: {
-                                                size: 12,
-                                                color: filteredRrgData.map(d => {
-                                                    if (d.x > 100 && d.y > 100) return '#00e676'; // Leading Green
-                                                    if (d.x < 100 && d.y > 100) return '#2979ff'; // Improving Blue
-                                                    if (d.x < 100 && d.y < 100) return '#ff1744'; // Lagging Red
-                                                    return '#ffea00'; // Weakening Yellow
-                                                }),
-                                                line: { width: 1, color: 'white' }
-                                            },
-                                            type: 'scatter',
-                                            hoverinfo: 'text+x+y+cluster' // cluster added for group info if formatted
-                                        }
-                                    ]}
-                                    layout={{
-                                        autosize: true,
-                                        margin: { t: 50, r: 20, l: 40, b: 40 },
-                                        xaxis: { title: 'RS-Ratio (Trend)', zeroline: false, gridcolor: '#333', range: [90, 110] }, // Fixed range or auto
-                                        yaxis: { title: 'RS-Momentum (Speed)', zeroline: false, gridcolor: '#333', range: [90, 110] },
-                                        paper_bgcolor: "rgba(0,0,0,0)",
-                                        plot_bgcolor: "rgba(0,0,0,0)",
-                                        font: { color: "#ddd" },
-                                        shapes: [
-                                            { type: 'line', x0: 100, x1: 100, y0: 0, y1: 200, line: { color: 'white', width: 1, dash: 'dot' } },
-                                            { type: 'line', x0: 0, x1: 200, y0: 100, y1: 100, line: { color: 'white', width: 1, dash: 'dot' } }
-                                        ],
-                                        annotations: [
-                                            { x: 105, y: 105, text: "LEADING (Dẫn dắt) 🟢", showarrow: false, font: { color: "#00e676", size: 14 }, opacity: 0.5 },
-                                            { x: 95, y: 105, text: "IMPROVING (Cải thiện) 🔵", showarrow: false, font: { color: "#2979ff", size: 14 }, opacity: 0.5 },
-                                            { x: 95, y: 95, text: "LAGGING (Tụt hậu) 🔴", showarrow: false, font: { color: "#ff1744", size: 14 }, opacity: 0.5 },
-                                            { x: 105, y: 95, text: "WEAKENING (Suy yếu) 🟡", showarrow: false, font: { color: "#ffea00", size: 14 }, opacity: 0.5 }
-                                        ]
-                                    }}
-                                    useResizeHandler={true}
-                                    style={{ width: '100%', height: '100%' }}
-                                    config={{ displayModeBar: false }}
-                                />
-                            </Suspense>
+                            <ErrorBoundary>
+                                <Suspense fallback={<div>Loading RRG...</div>}>
+                                    <Plot
+                                        data={[
+                                            {
+                                                x: filteredRrgData.map(d => d.x),
+                                                y: filteredRrgData.map(d => d.y),
+                                                text: filteredRrgData.map(d => d.ticker),
+                                                mode: 'text+markers',
+                                                textposition: 'top center',
+                                                marker: {
+                                                    size: 12,
+                                                    color: filteredRrgData.map(d => {
+                                                        if (d.x > 100 && d.y > 100) return '#00e676'; // Leading Green
+                                                        if (d.x < 100 && d.y > 100) return '#2979ff'; // Improving Blue
+                                                        if (d.x < 100 && d.y < 100) return '#ff1744'; // Lagging Red
+                                                        return '#ffea00'; // Weakening Yellow
+                                                    }),
+                                                    line: { width: 1, color: 'white' }
+                                                },
+                                                type: 'scatter',
+                                                hoverinfo: 'text+x+y+cluster' // cluster added for group info if formatted
+                                            }
+                                        ]}
+                                        layout={{
+                                            autosize: true,
+                                            margin: { t: 50, r: 20, l: 40, b: 40 },
+                                            xaxis: { title: 'RS-Ratio (Trend)', zeroline: false, gridcolor: '#333', range: [90, 110] }, // Fixed range or auto
+                                            yaxis: { title: 'RS-Momentum (Speed)', zeroline: false, gridcolor: '#333', range: [90, 110] },
+                                            paper_bgcolor: "rgba(0,0,0,0)",
+                                            plot_bgcolor: "rgba(0,0,0,0)",
+                                            font: { color: "#ddd" },
+                                            shapes: [
+                                                { type: 'line', x0: 100, x1: 100, y0: 0, y1: 200, line: { color: 'white', width: 1, dash: 'dot' } },
+                                                { type: 'line', x0: 0, x1: 200, y0: 100, y1: 100, line: { color: 'white', width: 1, dash: 'dot' } }
+                                            ],
+                                            annotations: [
+                                                { x: 105, y: 105, text: "LEADING (Dẫn dắt) 🟢", showarrow: false, font: { color: "#00e676", size: 14 }, opacity: 0.5 },
+                                                { x: 95, y: 105, text: "IMPROVING (Cải thiện) 🔵", showarrow: false, font: { color: "#2979ff", size: 14 }, opacity: 0.5 },
+                                                { x: 95, y: 95, text: "LAGGING (Tụt hậu) 🔴", showarrow: false, font: { color: "#ff1744", size: 14 }, opacity: 0.5 },
+                                                { x: 105, y: 95, text: "WEAKENING (Suy yếu) 🟡", showarrow: false, font: { color: "#ffea00", size: 14 }, opacity: 0.5 }
+                                            ]
+                                        }}
+                                        useResizeHandler={true}
+                                        style={{ width: '100%', height: '100%' }}
+                                        config={{ displayModeBar: false }}
+                                    />
+                                </Suspense>
+                            </ErrorBoundary>
                         )}
 
                         <div style={{ position: 'absolute', bottom: '10px', right: '10px', fontSize: '10px', color: '#666' }}>
@@ -466,14 +504,16 @@ const CommandCenter = () => {
                             ⚠️ Lỗi tải biểu đồ: {chartError}
                         </div>
                     ) : chartData ? (
-                        <Suspense fallback={<div>Loading Chart...</div>}>
-                            <Plot
-                                data={chartData.data}
-                                layout={{ ...chartData.layout, autosize: true, height: 600, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)" }}
-                                useResizeHandler={true}
-                                style={{ width: '100%', height: '100%' }}
-                            />
-                        </Suspense>
+                        <ErrorBoundary>
+                            <Suspense fallback={<div>Loading Chart...</div>}>
+                                <Plot
+                                    data={chartData.data}
+                                    layout={{ ...chartData.layout, autosize: true, height: 600, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)" }}
+                                    useResizeHandler={true}
+                                    style={{ width: '100%', height: '100%' }}
+                                />
+                            </Suspense>
+                        </ErrorBoundary>
                     ) : (
                         <div style={{ color: '#666', textAlign: 'center', padding: '50px' }}>
                             Nhập mã CK vào ô 'Fundamental Snapshot' và bấm CHECK để xem biểu đồ Volume Profile.

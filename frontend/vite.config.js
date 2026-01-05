@@ -13,11 +13,12 @@ export default defineConfig({
     },
   },
   build: {
-    chunkSizeWarningLimit: 1600,
+    chunkSizeWarningLimit: 3000, // Increase limit to suppress warning for Plotly
     rollupOptions: {
       output: {
         manualChunks: {
-          plotly: ['plotly.js', 'react-plotly.js']
+          vendor: ['react', 'react-dom', 'axios', 'framer-motion'],
+          plotly: ['react-plotly.js', 'plotly.js-dist-min']
         }
       }
     }
