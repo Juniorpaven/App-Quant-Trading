@@ -668,18 +668,88 @@ def read_root():
 
 @app.post("/api/run-ntf")
 def run_ntf_endpoint(req: NTFRequest):
-    ticker_list = [t.strip() for t in req.tickers.split(",")]
-    try:
-        data = get_data(ticker_list)
-        results = calculate_ntf(data, req.lookback)
+    # 1. Tách danh sách mã từ ô nhập liệu
+    raw_tickers = [t.strip() for t in req.tickers.split(",")]
+    clean_data = {} # Nơi chứa dữ liệu sạch
+    
+    print(f"📡 NTF Analysis: Scanning {len(raw_tickers)} tickers...")
+    
+    # 2. Vòng lặp kiểm tra từng mã (Chế độ An toàn - Immortal Fix)
+    for t in raw_tickers:
+        try:
+            # Standardize Ticker for Yahoo (add .VN if missing and no special chars)
+            yf_ticker = t
+            if not any(x in t for x in ["^", "-", "."]):
+                 yf_ticker = t + ".VN"
+
+            # Tải dữ liệu từng mã riêng lẻ để dễ kiểm soát lỗi
+            # User requested "3mo", we use "6mo" to be safe for slightly larger lookbacks if needed, 
+            # but usually NTF looks at last 20 days.
+            df = yf.download(yf_ticker, period="6mo", progress=False, auto_adjust=True)
+            
+            # Xử lý trường hợp Yahoo trả về MultiIndex hoặc sai định dạng
+            if isinstance(df.columns, pd.MultiIndex):
+                try: 
+                    # Try to find the ticker level
+                    if yf_ticker in df.columns.levels[1]:
+                         df = df.xs(yf_ticker, level=1, axis=1)
+                except: pass
+
+            # KIỂM TRA ĐIỀU KIỆN
+            # 1. Dữ liệu rỗng?
+            if df.empty:
+                print(f"Bỏ qua {t}: Rỗng")
+                continue
+            
+            # Determine Target Column (Close or Adj Close)
+            target_col = 'Close'
+            if 'Close' not in df.columns and 'Adj Close' in df.columns:
+                target_col = 'Adj Close'
+                
+            if target_col not in df.columns:
+                 continue
+
+            # 2. Không đủ số ngày tính toán (Lookback)?
+            if len(df) < req.lookback:
+                print(f"Bỏ qua {t}: Không đủ dữ liệu ({len(df)} dòng)")
+                continue
+                
+            # 3. Giá trị bị NaN quá nhiều?
+            if df[target_col].isnull().sum() > 5:
+                print(f"Bỏ qua {t}: Quá nhiều NaN")
+                continue
+
+            # Nếu ngon lành thì thêm vào kho
+            clean_data[t] = df[target_col]
+            
+        except Exception as e:
+            print(f"Error checking {t}: {e}")
+            continue # Lỗi thì bỏ qua, đi tiếp mã sau
+            
+    # 3. TÍNH TOÁN TRÊN DỮ LIỆU SẠCH
+    results = {}
+    missing = []
+    
+    if len(clean_data) > 0:
+        df_combined = pd.DataFrame(clean_data)
         
-        # Calculate missing tickers
-        processed = data.columns.tolist()
-        missing = list(set(ticker_list) - set(processed))
+        # --- Logic Tính toán Momentum cũ ---
+        # 1. Align Data
+        df_combined = df_combined.ffill().dropna()
         
-        return {"status": "success", "data": results, "missing": missing}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # 2. Calculate
+        if len(df_combined) >= req.lookback:
+            returns = df_combined.pct_change().dropna()
+            momentum = returns.iloc[-req.lookback:].mean() * 252
+            scores = momentum.to_dict()
+            results = {k: round(v, 4) for k, v in scores.items()}
+        
+    # Calculate detailed missing list
+    processed_list = list(results.keys())
+    missing = list(set(raw_tickers) - set(processed_list))
+    
+    # Return result
+    return {"status": "success", "data": results, "missing": missing}
 
 @app.post("/api/run-ops")
 def run_ops_endpoint(req: OPSRequest):

@@ -33,19 +33,26 @@ const CommandCenter = () => {
         return () => window.removeEventListener('resize', handleResize);
     }, []);
 
+    const [chartError, setChartError] = useState(null);
+
     const fetchChart = async (ticker) => {
         setIsChartLoading(true);
+        setChartError(null);
         try {
             const res = await axios.post(`${API_URL}/api/dashboard/chart`, { ticker });
             if (res.data.data) {
                 setChartData(res.data.data);
             } else {
-                console.error("Chart error:", res.data.error);
+                const msg = res.data.error || "Không có dữ liệu trả về";
+                console.error("Chart error:", msg);
                 setChartData(null);
+                setChartError(msg);
             }
         } catch (e) {
             console.error("Chart fetch error", e);
             setChartData(null);
+            const msg = e.response?.data?.detail || e.message || "Lỗi kết nối";
+            setChartError(msg);
         }
         setIsChartLoading(false);
     };
@@ -576,12 +583,15 @@ const CommandCenter = () => {
                 </div>
             </div>
             {/* 3. NEW FULL WIDTH CHART SECTION */}
-            {/* 3. NEW FULL WIDTH CHART SECTION */}
             <div style={{ marginTop: '20px', padding: '20px', backgroundColor: '#1e1e1e', borderRadius: '12px', border: '1px solid #333' }}>
                 <h3 style={{ color: '#00e5ff', fontSize: '1.2em', marginBottom: '15px' }}>📈 SMART CHART + VOLUME PROFILE (POC)</h3>
                 <div style={{ minHeight: '500px' }}>
                     {isChartLoading ? (
                         <div style={{ color: '#888', textAlign: 'center', padding: '50px' }}>Loading Chart for {fundTicker}...</div>
+                    ) : chartError ? (
+                        <div style={{ color: '#ff1744', textAlign: 'center', padding: '50px' }}>
+                            ⚠️ Lỗi tải biểu đồ: {chartError}
+                        </div>
                     ) : chartData ? (
                         <Suspense fallback={<div>Loading Chart...</div>}>
                             <Plot
