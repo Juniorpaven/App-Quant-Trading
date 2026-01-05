@@ -1,6 +1,6 @@
+import React, { useState, useEffect, Suspense } from 'react';
+import axios from 'axios';
 import html2canvas from 'html2canvas';
-
-// ... (imports remain)
 const Plot = React.lazy(() => import('react-plotly.js'));
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
