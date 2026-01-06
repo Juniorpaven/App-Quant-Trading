@@ -366,8 +366,9 @@ def calculate_volume_profile(df, price_col='Close', vol_col='Volume', bins=50):
     if len(df) < 2: return pd.DataFrame(), 0
 
     # 1. Xác định biên độ giá toàn bộ giai đoạn
-    min_price = df['Low'].min()
-    max_price = df['High'].max()
+    # Fix: Ensure scalar values if DF has multi-index or slight structure issues
+    min_price = float(df['Low'].min())
+    max_price = float(df['High'].max())
     
     # 2. Chia nhỏ mức giá thành các giỏ (bins)
     price_range = np.linspace(min_price, max_price, bins)

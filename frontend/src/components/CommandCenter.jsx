@@ -66,13 +66,32 @@ const CommandCenter = () => {
             const canvas = await html2canvas(element, {
                 useCORS: true,
                 allowTaint: true,
-                backgroundColor: '#1a1a1a' // Dark background for JPG
+                backgroundColor: '#1a1a1a' // Dark background
             });
-            const image = canvas.toDataURL("image/jpeg", 1.0);
-            const link = document.createElement('a');
-            link.href = image;
-            link.download = `${fileName}_${new Date().toISOString().slice(0, 10)}.jpg`;
-            link.click();
+
+            canvas.toBlob(async (blob) => {
+                if (!blob) {
+                    alert("Lỗi: Không thể tạo ảnh từ giao diện.");
+                    return;
+                }
+                try {
+                    // Try copying to clipboard
+                    const item = new ClipboardItem({ "image/png": blob });
+                    await navigator.clipboard.write([item]);
+                    alert("✅ Đã lưu ảnh vào bộ nhớ tạm! Bạn có thể Ctrl + V dán ngay vào Zalo/Facebook/Word.");
+                } catch (err) {
+                    console.warn("Clipboard API failed, falling back to download:", err);
+                    // Fallback to download if clipboard fails
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `${fileName}_${new Date().toISOString().slice(0, 10)}.png`;
+                    link.click();
+                    URL.revokeObjectURL(url);
+                    alert("⚠️ Trình duyệt chặn copy tự động. Hệ thống đã chuyển sang tải ảnh về máy.");
+                }
+            }, "image/png");
+
         } catch (err) {
             console.error("Export failed:", err);
             alert("Lỗi xuất ảnh: " + err.message);
