@@ -221,86 +221,15 @@ const CommandCenter = () => {
 
     // --- RRG SNAPSHOT UPLOAD MODE ---
     const handleFileUpload = (event) => {
-        isManualMode.current = true; // LOCK STATE: Prevent background API from overwriting
         const file = event.target.files[0];
         if (!file) return;
-
         const reader = new FileReader();
         reader.onload = (e) => {
             const text = e.target.result;
-            const lines = text.split('\n').filter(l => l.trim());
-            const data = [];
-            const foundGroups = new Set();
-
-            // PARSE CSV based on user's exact format:
-            // Ticker,Group,RS_Ratio,RS_Momentum
-            for (let i = 1; i < lines.length; i++) {
-                const line = lines[i].trim();
-                if (!line) continue;
-                const parts = line.split(',');
-
-                if (parts.length >= 4) {
-                    const ticker = parts[0].replace(/["']/g, "").trim();
-                    const group = parts[1].replace(/["']/g, "").trim();
-                    const ratio = parseFloat(parts[2]);
-                    const mom = parseFloat(parts[3]);
-
-                    if (isNaN(ratio) || isNaN(mom)) continue; // Skip bad rows
-
-                    foundGroups.add(group);
-
-                    data.push({
-                        ticker: ticker,
-                        x: ratio,
-                        y: mom,
-                        group: group
-                    });
-                }
-            }
-
-            // UPDATE STATE
-            setRrgData(data);
-            setGroups(['ALL', ...Array.from(foundGroups).sort()]);
-            setIsRrgLoading(false);
-            setMarketError(false);
-
-            // --- AUTO CALCULATE TOP LEADERS ---
-            // Find stocks in Leading quadrant (x>100, y>100), sort by distance from center (strength)
-            const leaders = data
-                .filter(d => d.x > 100 && d.y > 100)
-                .sort((a, b) => (b.x + b.y) - (a.x + a.y)) // Simple sort by sum of scores
-                .slice(0, 5) // Top 5
-                .map(d => d.ticker);
-
-            setLeaders(leaders);
-
-            // --- AUTO RESTORE SMART PULSE (Hybrid Logic for CSV) ---
-            // 1. Breadth Score (0.6): % of stocks with RS-Ratio > 100
-            if (data.length > 0) {
-                const bullishCount = data.filter(d => d.x > 100).length;
-                const breadthScore = (bullishCount / data.length) * 2 - 1; // -1 to 1
-
-                // 2. Momentum Score (0.4): Average RS-Momentum (Proxy for Return)
-                // y is centered at 100. We average (y-100)
-                // Approx scaling: +/- 2.5 units of momentum is strong. 
-                const avgMomRaw = data.reduce((acc, d) => acc + (d.y - 100), 0) / data.length;
-                let momScore = avgMomRaw / 2.5;
-                momScore = Math.max(-1, Math.min(1, momScore));
-
-                // 3. Smart Pulse
-                const score = (0.6 * breadthScore) + (0.4 * momScore);
-
-                let status = "TRUNG TÍNH (Sideways)";
-                let color = "#ffea00"; // Yellow
-                if (score > 0.2) { status = "BULLISH (Tăng giá) 🐂"; color = "#00e676"; }
-                else if (score < -0.2) { status = "BEARISH (Giảm giá) 🐻"; color = "#ff1744"; }
-
-                setSentiment({
-                    market_status: status,
-                    market_score: parseFloat(score.toFixed(2)),
-                    market_color: color
-                });
-            }
+            processCSVData(text); // Reuse Logic
+            setIsUsingFallback(true); // Treat manual upload as fallback mode
+            setIsRrgLoading(false); // No longer loading from API
+            setMarketError(null); // Clear any market error
         };
         reader.readAsText(file);
     };
