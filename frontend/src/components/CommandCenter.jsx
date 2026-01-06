@@ -552,7 +552,7 @@ const CommandCenter = () => {
                                 gap: '5px',
                                 boxShadow: '0 2px 10px rgba(0,0,0,0.3)'
                             }}>
-                                ⚠️ RRG MODE: OFFLINE (Dữ liệu cũ) - Pulse đang là Realtime. Hãy tin theo Pulse.
+                                ⚠️ RRG OFFLINE MODE
                             </div>
                         )}
 
