@@ -140,7 +140,8 @@ function App() {
       const res = await axios.post(`${API_URL}/api/run-ops`, {
         tickers: opsTickers,
         eta: Number(opsEta),
-        lookbacks: opsLookbacks
+        lookbacks: opsLookbacks,
+        max_weight: Number(opsMaxWeight)
       });
       setOpsResult(res.data.weights);
     } catch (err) {

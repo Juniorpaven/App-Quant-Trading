@@ -130,14 +130,22 @@ def apply_max_weight_constraint(weights, max_weight):
     if max_weight >= 1.0 - 1e-5:
         return weights
     
-    # Simple projection: clip and re-normalize, iterate a few times
-    for _ in range(5): # 5 iterations usually enough for simple constraints
-        weights = np.minimum(weights, max_weight)
-        if np.sum(weights) == 0: return np.ones(len(weights)) / len(weights)
-        weights /= np.sum(weights)
-        if np.all(weights <= max_weight + 1e-5):
-            break
-            
+    # Clip weights to max_weight
+    weights = np.minimum(weights, max_weight)
+    
+    # If sum > 1, we might need to normalize, but usually after clipping max_weight < 1, 
+    # the sum will be <= 1 (unless we had many items).
+    # If sum < 1, it means we hold CASH.
+    
+    # However, if original sum was 1, and we clip, sum implies reduced exposure.
+    # Logic: Simply Clipping is enough to satisfy "Max Weight" constraint
+    # and implicitly creates a "Cash" position.
+    
+    # Verify sum > 1 case (Edge case where many small items sum > 1 but individual <= max? 
+    # No, if we start with sum=1, and clip, sum can only decrease or stay same).
+    # Wait, if we implement a constraint where we WANT to be fully invested but CAN'T due to max_weight?
+    # Then we can't. So Cash is the only option.
+    
     return weights
 
 def run_backtest_simulation(data, eta=0.05, max_weight=1.0, transaction_fee=0.0015):
@@ -249,6 +257,7 @@ class OPSRequest(BaseModel):
     tickers: str
     eta: float = 0.05 # Learning rate
     lookbacks: str = "20, 60, 120" # Chuỗi các lookback cho chiến lược Ensemble
+    max_weight: float = 1.0 # New Parameter for Constraint
 
 class BacktestRequest(BaseModel):
     tickers: str
@@ -793,10 +802,28 @@ def run_ops_endpoint(req: OPSRequest):
         if valid_strategies > 0:
             for ticker in final_weights:
                 final_weights[ticker] /= valid_strategies
-                # Làm tròn
-                final_weights[ticker] = round(final_weights[ticker], 4)
+                
+        # --- APDY CONSTRAINT (FIX) ---
+        # Convert dict to numpy array for constraint function
+        tickers_ordered = list(final_weights.keys())
+        w_values = np.array([final_weights[t] for t in tickers_ordered])
         
-        return {"status": "success", "weights": final_weights, "algo": "Ensemble EG (Dynamic Momentum)"}
+        # Apply Constraint (Max Weight + Implicit Cash)
+        w_constrained = apply_max_weight_constraint(w_values, req.max_weight)
+        
+        # Re-map to dict
+        constrained_result = {}
+        for i, t in enumerate(tickers_ordered):
+            val = float(w_constrained[i])
+            if val > 0.0001: # Filter tiny dust
+                constrained_result[t] = round(val, 4)
+                
+        # Add Cash info if any
+        total_invested = sum(constrained_result.values())
+        if total_invested < 0.999:
+             constrained_result["CASH (Tiền mặt)"] = round(1.0 - total_invested, 4)
+        
+        return {"status": "success", "weights": constrained_result, "algo": "Ensemble EG (Constrained)"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
