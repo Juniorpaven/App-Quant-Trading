@@ -915,7 +915,8 @@ def backtest_endpoint(req: BacktestRequest):
 def get_dashboard_sentiment():
     try:
         # 1. Market Sentiment (VN30 NTF Score)
-        data = get_data(VN30_LIST, period="6mo")
+        # Fix: Use 1 year window for better Market Pulse accuracy (MA200 logic equivalent)
+        data = get_data(VN30_LIST, period="1y")
         ntf_scores = calculate_ntf(data, lookback=20)
         
         if "error" in ntf_scores:
