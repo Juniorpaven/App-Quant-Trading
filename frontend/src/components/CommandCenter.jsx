@@ -274,21 +274,33 @@ const CommandCenter = () => {
 
             setLeaders(leaders);
 
-            // --- AUTO RESTORE MARKET PULSE ---
-            // Calculate a synthetic market score based on % of stocks above 100 RS-Ratio
-            const bullishCount = data.filter(d => d.x > 100).length;
-            const score = (bullishCount / data.length) * 2 - 1; // Map 0..1 to -1..1
+            // --- AUTO RESTORE SMART PULSE (Hybrid Logic for CSV) ---
+            // 1. Breadth Score (0.6): % of stocks with RS-Ratio > 100
+            if (data.length > 0) {
+                const bullishCount = data.filter(d => d.x > 100).length;
+                const breadthScore = (bullishCount / data.length) * 2 - 1; // -1 to 1
 
-            let status = "SIDEWAYS";
-            let color = "white";
-            if (score > 0.2) { status = "BULLISH"; color = "#00e676"; }
-            else if (score < -0.2) { status = "BEARISH"; color = "#ff1744"; }
+                // 2. Momentum Score (0.4): Average RS-Momentum (Proxy for Return)
+                // y is centered at 100. We average (y-100)
+                // Approx scaling: +/- 2.5 units of momentum is strong. 
+                const avgMomRaw = data.reduce((acc, d) => acc + (d.y - 100), 0) / data.length;
+                let momScore = avgMomRaw / 2.5;
+                momScore = Math.max(-1, Math.min(1, momScore));
 
-            setSentiment({
-                market_status: status,
-                market_score: parseFloat(score.toFixed(2)),
-                market_color: color
-            });
+                // 3. Smart Pulse
+                const score = (0.6 * breadthScore) + (0.4 * momScore);
+
+                let status = "TRUNG TÍNH (Sideways)";
+                let color = "#ffea00"; // Yellow
+                if (score > 0.2) { status = "BULLISH (Tăng giá) 🐂"; color = "#00e676"; }
+                else if (score < -0.2) { status = "BEARISH (Giảm giá) 🐻"; color = "#ff1744"; }
+
+                setSentiment({
+                    market_status: status,
+                    market_score: parseFloat(score.toFixed(2)),
+                    market_color: color
+                });
+            }
         };
         reader.readAsText(file);
     };
@@ -397,9 +409,18 @@ const CommandCenter = () => {
                             {/* LEFT: SENTIMENT */}
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px' }}>
                                 <div style={{ textAlign: 'center' }}>
-                                    <div style={{ fontSize: '10px', color: '#888', textTransform: 'uppercase', letterSpacing: '1px' }}>MARKET PULSE (VN30)</div>
+                                    <div style={{ fontSize: '10px', color: '#888', textTransform: 'uppercase', letterSpacing: '1px' }}>SMART PULSE (VN30)</div>
                                     <h3 style={{ margin: '5px 0', fontSize: '1.8em', color: sentiment.market_color }}>{sentiment.market_status}</h3>
-                                    <div style={{ fontSize: '2em', fontWeight: 'bold', color: sentiment.market_color }}>{sentiment.market_score}</div>
+                                    <div style={{ fontSize: '2em', fontWeight: 'bold', color: sentiment.market_color }}>
+                                        {sentiment.market_score}
+                                        {/* DELTA DISPLAY */}
+                                        {sentiment.delta !== undefined && (
+                                            <span style={{ fontSize: '0.5em', marginLeft: '10px', color: sentiment.delta > 0 ? '#00e676' : (sentiment.delta < 0 ? '#ff1744' : '#888') }}>
+                                                {sentiment.delta > 0 ? "↗️" : (sentiment.delta < 0 ? "↘️" : "➖")}
+                                                {sentiment.delta > 0 ? "+" : ""}{sentiment.delta}
+                                            </span>
+                                        )}
+                                    </div>
                                 </div>
 
                                 {/* Mini Gauge Chart */}
@@ -410,16 +431,16 @@ const CommandCenter = () => {
                                                 data={[{
                                                     type: "indicator",
                                                     mode: "gauge",
-                                                    value: sentiment.market_score + 1, // Shift range -1..1 to 0..2 for gauge
+                                                    value: sentiment.market_score, // Now 0..1
                                                     gauge: {
-                                                        axis: { range: [0, 2], visible: false },
-                                                        bar: { color: sentiment.market_color },
+                                                        axis: { range: [0, 1], visible: false },
+                                                        bar: { color: sentiment.market_color }, // Dynamic color from backend
                                                         bgcolor: "#333",
                                                         borderwidth: 0,
                                                         steps: [
-                                                            { range: [0, 0.9], color: "#444" }, // Red zone equivalent
-                                                            { range: [0.9, 1.1], color: "#555" },
-                                                            { range: [1.1, 2], color: "#666" }
+                                                            { range: [0, 0.3], color: "rgba(239, 83, 80, 0.3)" }, // RED Zone (Fear)
+                                                            { range: [0.3, 0.7], color: "rgba(117, 117, 117, 0.3)" }, // GREY Zone (Neutral)
+                                                            { range: [0.7, 1], color: "rgba(102, 187, 106, 0.3)" } // GREEN Zone (Greed)
                                                         ]
                                                     }
                                                 }]}

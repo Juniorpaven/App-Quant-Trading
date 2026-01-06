@@ -1,4 +1,3 @@
-
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -7,6 +6,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+from scipy import stats # For Percentile Rank
 
 # Removed top-level vnstock import to prevent startup timeout
 # vnstock will be imported lazily in get_vnstock_fundamentals
@@ -914,41 +914,123 @@ def backtest_endpoint(req: BacktestRequest):
 @app.get("/api/dashboard/sentiment")
 def get_dashboard_sentiment():
     try:
-        # 1. Market Sentiment (VN30 NTF Score)
-        # Fix: Use 1 year window for better Market Pulse accuracy (MA200 logic equivalent)
-        data = get_data(VN30_LIST, period="1y")
-        ntf_scores = calculate_ntf(data, lookback=20)
+        # --- SMART PULSE LOGIC WITH DELTA (T-0 vs T-1) ---
         
-        if "error" in ntf_scores:
-            return {"score": 0, "status": "No Data", "top_movers": []}
+        # 1. Fetch Data (Must include VNINDEX for accurate RRG Breadth)
+        full_list = VN30_LIST + ["^VNINDEX"]
+        data = get_data(full_list, period="2y") 
+        if data.empty or "^VNINDEX" not in data.columns:
+             return {"market_score": 0, "market_status": "No Data", "delta": 0, "top_movers": []}
+
+        # 2. RS-RATIO BREADTH CALCULATION (For T-0 and T-1)
+        # Re-calc locally to get history
+        benchmark = data["^VNINDEX"]
+        breadth_scores = [] # [Score_T1, Score_T0]
         
-        # Calc Average Score (Market Health)
-        valid_scores = [v for v in ntf_scores.values()]
-        avg_score = sum(valid_scores) / len(valid_scores) if valid_scores else 0
+        # We need the last 2 days indices
+        # Ensure we have enough data
+        if len(data) < 20: return {"market_score": 0, "market_status": "No Data", "delta": 0}
         
-        # Normalize to 0-100 or 0-1 range for Gauge?
-        # NTF Score output usually is raw value (returns * 252). E.g. 0.5 (50% CAGR momentum)
-        # Let's map: <0: Fear, 0-0.5: Neutral, >0.5: Greed
+        # Indices for T-1 (Yesterday) and T-0 (Today)
+        # Note: pct_change etc might produce NaNs at start, so tail is safe
+        target_indices = [-2, -1] 
         
-        # Determine Status
-        status = "Bình thường"
-        color = "yellow"
-        if avg_score < -0.1: status = "SỢ HÃI (Giữ tiền) 🐻"; color = "red"
-        elif avg_score > 0.3: status = "THAM LAM (Full Margin) 🐮"; color = "green"
+        # Pre-calc RS Ratio for all stocks
+        # RS = 100 * (Price / Bench). RS-Ratio = MA10(RS)
+        # Optimize: Calculate Rolling only for columns in VN30_LIST
+        rs_above_100_counts = [0, 0] # [Count_T1, Count_T0]
+        valid_tickers_count = 0
         
-        # 2. Top 3 Movers (Strongest)
-        sorted_tickers = sorted(ntf_scores.items(), key=lambda x: x[1], reverse=True)
-        top_3 = []
-        for t, s in sorted_tickers[:3]:
-            # Simple recommendation
-            rec = "MUA MẠNH" if s > 0.3 else ("MUA" if s > 0 else "QUAN SÁT")
-            top_3.append({"ticker": t.replace(".VN",""), "score": s, "action": rec})
+        for t in VN30_LIST:
+            if t not in data.columns: continue
+            valid_tickers_count += 1
             
+            rs_raw = 100 * (data[t] / benchmark)
+            rs_ratio = rs_raw.rolling(window=10).mean()
+            
+            # Check T-1
+            if rs_ratio.iloc[-2] > 100: rs_above_100_counts[0] += 1
+            # Check T-0
+            if rs_ratio.iloc[-1] > 100: rs_above_100_counts[1] += 1
+            
+        breadth_t1 = rs_above_100_counts[0] / valid_tickers_count if valid_tickers_count else 0
+        breadth_t0 = rs_above_100_counts[1] / valid_tickers_count if valid_tickers_count else 0
+
+        # --- MOMENTUM SCORE (Percentile Rank) ---
+        # Basket Return Proxy
+        # Exclude VNINDEX from "VN30 Basket Momentum"
+        basket_cols = [c for c in data.columns if c != "^VNINDEX"]
+        basket_daily_ret = data[basket_cols].pct_change(fill_method=None).mean(axis=1)
+        
+        # Rolling 20d return
+        mom_series = basket_daily_ret.rolling(window=20).mean() * 20
+        mom_series = mom_series.dropna()
+        
+        mom_scores = [0.5, 0.5]
+        if len(mom_series) > 255:
+            # T-1 Logic
+            hist_window_t1 = mom_series.iloc[-253:-1] # Past 252 days relative to T-1
+            curr_mom_t1 = mom_series.iloc[-2]
+            mom_scores[0] = stats.percentileofscore(hist_window_t1, curr_mom_t1) / 100.0
+            
+            # T-0 Logic (Today)
+            hist_window_t0 = mom_series.iloc[-252:]
+            curr_mom_t0 = mom_series.iloc[-1]
+            mom_scores[1] = stats.percentileofscore(hist_window_t0, curr_mom_t0) / 100.0
+
+        # --- REGIME FILTER (MA200) ---
+        basket_price = data[basket_cols].mean(axis=1)
+        ma200_series = basket_price.rolling(window=200).mean()
+        
+        regime_multipliers = [1.0, 1.0]
+        
+        # T-1 Regime
+        if basket_price.iloc[-2] < ma200_series.iloc[-2]: regime_multipliers[0] = 0.7
+        # T-0 Regime
+        if basket_price.iloc[-1] < ma200_series.iloc[-1]: regime_multipliers[1] = 0.7
+        
+        # --- FINAL SCORES & DELTA ---
+        # SmartPulse = (0.6*Breadth + 0.4*Mom) * Regime
+        
+        score_t1 = (0.6 * breadth_t1 + 0.4 * mom_scores[0]) * regime_multipliers[0]
+        score_t0 = (0.6 * breadth_t0 + 0.4 * mom_scores[1]) * regime_multipliers[1]
+        
+        delta = score_t0 - score_t1
+        
+        # --- DISPLAY STATUS (For T-0) ---
+        smart_pulse_score = round(score_t0, 2)
+        
+        status = "TRUNG TÍNH (Neutral) 😐"
+        color = "#ffea00"
+        if smart_pulse_score < 0.3:
+            status = "SỢ HÃI (Fear) 🐻 - Cash King"
+            color = "#ff1744"
+        elif smart_pulse_score > 0.7:
+            status = "THAM LAM (Greed) 🐂 - Full Margin"
+            color = "#00e676"
+            
+        # --- RE-USE RRG API FOR MOVERS (To avoid duplicating logic 3rd time) ---
+        # Or just use the Breadth loop? No, movers leverage RS Momentum too. 
+        # Let's call calculate_rrg_data safely.
+        rrg_data = calculate_rrg_data(VN30_LIST) 
+        leaders = sorted(rrg_data, key=lambda d: d['x'], reverse=True)
+        top_3 = []
+        for item in leaders[:3]:
+            s = item['x']
+            action = "DẪN DẮT A+" if s > 102 else "MẠNH"
+            top_3.append({"ticker": item['ticker'], "score": s, "action": action})
+
         return {
-            "market_score": round(avg_score, 4),
+            "market_score": smart_pulse_score,
             "market_status": status,
             "market_color": color,
-            "top_movers": top_3
+            "delta": round(delta, 2), # New Delta Field
+            "top_movers": top_3,
+            "debug_info": {
+                "t0_stats": f"B:{breadth_t0:.2f} M:{mom_scores[1]:.2f} R:{regime_multipliers[1]}",
+                "t1_stats": f"B:{breadth_t1:.2f} M:{mom_scores[0]:.2f} R:{regime_multipliers[0]}",
+                "delta_val": delta
+            }
         }
     except Exception as e:
         print(f"Sentiment Error: {e}")
