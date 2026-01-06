@@ -101,8 +101,8 @@ const CommandCenter = () => {
     // ... (rest of logic: fetchChart, fetchSentiment, fetchRRG, checkFundamentals, handleFileUpload)
 
     useEffect(() => {
-        fetchSentiment();
-        fetchRRG();
+        // fetchSentiment(); // Deprecated
+        // fetchRRG(); // Deprecated - replaced by smartFetchData
         const handleResize = () => setIsMobile(window.innerWidth < 768);
         window.addEventListener('resize', handleResize);
         return () => window.removeEventListener('resize', handleResize);
