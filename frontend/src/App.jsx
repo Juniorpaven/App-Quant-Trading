@@ -384,7 +384,8 @@ function App() {
           </div>
 
           {/* OPS CONFIG */}
-          <div style={cardStyle}>
+          <div id="ops-config-section" style={{ ...cardStyle, position: 'relative' }}>
+            <button onClick={() => exportToImage('ops-config-section', 'Portfolio_Config')} style={{ position: 'absolute', top: '10px', right: '10px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '20px' }} title="Export Image">📸</button>
             <h2>⚖️ Portfolio Config</h2>
 
             <div style={inputGroup}>
