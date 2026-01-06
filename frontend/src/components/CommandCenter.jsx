@@ -133,39 +133,131 @@ const CommandCenter = () => {
         setIsChartLoading(false);
     };
 
-    const fetchSentiment = async () => {
-        try {
-            const res = await axios.get(`${API_URL}/api/dashboard/sentiment`);
-            if (isManualMode.current) return;
-            setSentiment(res.data);
-            if (res.data && res.data.top_movers) {
-                setLeaders(res.data.top_movers.map(m => m.ticker));
-            }
-        } catch (e) { console.error("Sentiment error", e); }
-    };
+    // --- SMART POLLING STATE ---
+    const [lastUpdated, setLastUpdated] = useState(null);
+    const [isUsingFallback, setIsUsingFallback] = useState(false);
+    const retryCount = React.useRef(0);
+    const pollingTimer = React.useRef(null);
 
-    const fetchRRG = async () => {
-        try {
-            setIsRrgLoading(true);
-            const res = await axios.post(`${API_URL}/api/dashboard/rrg`);
-            if (isManualMode.current) {
-                setIsRrgLoading(false);
-                return;
-            }
-            const data = res.data.data || [];
-            setRrgData(data);
-            setIsRrgLoading(false);
-            setMarketError(false);
-            const groups = new Set(data.map(d => d.group || "Unclassified"));
-            setGroups(['ALL', ...Array.from(groups).sort()]);
-        } catch (e) {
-            console.error("RRG error", e);
-            if (!isManualMode.current) {
-                setIsRrgLoading(false);
-                setMarketError(true);
+    // --- SHARED CSV PARSER ---
+    const processCSVData = (csvText) => {
+        const lines = csvText.split('\n');
+        const headers = lines[0].split(',').map(h => h.trim());
+        if (!headers.includes('RS_Ratio') || !headers.includes('RS_Momentum')) return;
+
+        const data = [];
+        for (let i = 1; i < lines.length; i++) {
+            const row = lines[i].split(',');
+            if (row.length < 4) continue;
+            const ticker = row[0].trim();
+            const group = row[1].trim();
+            const ratio = parseFloat(row[2]);
+            const mom = parseFloat(row[3]);
+            if (!isNaN(ratio) && !isNaN(mom)) {
+                data.push({ ticker, group, x: ratio, y: mom, size: 10 });
             }
         }
+
+        if (data.length > 0) {
+            setRrgData(data);
+            setIsRrgLoading(false);
+            setMarketError(null);
+            const groups = new Set(data.map(d => d.group || "Unclassified"));
+            setGroups(['ALL', ...Array.from(groups).sort()]);
+
+            // Auto-Calc Leaders
+            setLeaders(data.sort((a, b) => b.x - a.x).slice(0, 3).map(d => d.ticker));
+
+            // Hybrid Sentiment Calc
+            const bulls = data.filter(d => d.x > 100).length;
+            const breadth = (bulls / data.length) * 2 - 1;
+            const avgMom = data.reduce((acc, d) => acc + (d.y - 100), 0) / data.length;
+            let momScore = Math.max(0, Math.min(1, (avgMom + 5) / 10)); // Normalize
+            // Breadth 0-1
+            const breadth01 = bulls / data.length;
+            const score = (0.6 * breadth01) + (0.4 * momScore);
+
+            let status = "TRUNG TÍNH (Neutral) 😐";
+            let color = "#ffea00";
+            if (score > 0.7) { status = "THAM LAM (Greed) 🐂"; color = "#00e676"; }
+            else if (score < 0.3) { status = "SỢ HÃI (Fear) 🐻"; color = "#ff1744"; }
+
+            setSentiment({
+                market_score: parseFloat(score.toFixed(2)),
+                market_status: status + " (Offline Mode)",
+                market_color: color,
+                delta: 0
+            });
+        }
     };
+
+    // --- SMART FETCH (EXPONENTIAL BACKOFF) ---
+    const smartFetchData = async () => {
+        try {
+            // 1. Try Server
+            const [sentRes, rrgRes] = await Promise.all([
+                axios.get(`${API_URL}/api/dashboard/sentiment`),
+                axios.post(`${API_URL}/api/dashboard/rrg`)
+            ]);
+
+            // 2. Success
+            if (isManualMode.current) return; // Don't overwrite if user manually uploaded
+
+            setSentiment(sentRes.data);
+            if (sentRes.data.top_movers) setLeaders(sentRes.data.top_movers.map(m => m.ticker));
+
+            const rrgList = rrgRes.data.data || [];
+            const mappedRrg = rrgList.map(item => ({
+                ticker: item.ticker,
+                x: item.rs_ratio,
+                y: item.rs_momentum,
+                group: item.group,
+                size: item.cap_size || 10
+            }));
+            setRrgData(mappedRrg);
+            setGroups(['ALL', ...Array.from(new Set(mappedRrg.map(d => d.group))).sort()]);
+
+            setIsRrgLoading(false);
+            setMarketError(false);
+            setIsUsingFallback(false);
+            retryCount.current = 0; // Reset Retry
+            setLastUpdated(new Date());
+
+            // Schedule Next Poll (30s)
+            if (pollingTimer.current) clearTimeout(pollingTimer.current);
+            pollingTimer.current = setTimeout(smartFetchData, 30000);
+
+        } catch (err) {
+            console.warn(`Attempt ${retryCount.current + 1} Failed:`, err);
+
+            // 3. Fallback Logic
+            if ((rrgData.length === 0 || isUsingFallback) && !isManualMode.current) {
+                try {
+                    console.log("📂 Loading Backup CSV...");
+                    const csvRes = await fetch('data/rrg_snapshot.csv');
+                    if (csvRes.ok) {
+                        const text = await csvRes.text();
+                        processCSVData(text);
+                        setIsUsingFallback(true);
+                    } else {
+                        console.error("No Backup CSV Found");
+                        setMarketError(true);
+                    }
+                } catch (e) { console.error("Backup Error", e); }
+            }
+
+            // 4. Backoff Schedule
+            const wait = Math.min(60000, 5000 * Math.pow(2, retryCount.current));
+            retryCount.current++;
+            if (pollingTimer.current) clearTimeout(pollingTimer.current);
+            pollingTimer.current = setTimeout(smartFetchData, wait);
+        }
+    };
+
+    useEffect(() => {
+        smartFetchData();
+        return () => clearTimeout(pollingTimer.current);
+    }, []);
 
     const checkFundamentals = async () => {
         if (!fundTicker) return;
