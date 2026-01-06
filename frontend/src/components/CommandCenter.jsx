@@ -133,13 +133,17 @@ const CommandCenter = () => {
         setIsChartLoading(false);
     };
 
-    // --- SMART POLLING STATE ---
-    const [lastUpdated, setLastUpdated] = useState(null);
-    const [isUsingFallback, setIsUsingFallback] = useState(false);
+    // --- DECOUPLED STATE MANAGEMENT ---
+    const [rrgMode, setRrgMode] = useState('LOADING'); // 'LOADING' | 'ONLINE' | 'OFFLINE'
+    const rrgRetryCount = React.useRef(0);
+    const rrgTimer = React.useRef(null);
+    const pulseTimer = React.useRef(null);
+    // (Deprecated state placeholders to avoid breaking rest of code if referenced anywhere)
     const retryCount = React.useRef(0);
-    const pollingTimer = React.useRef(null);
+    const [isUsingFallback, setIsUsingFallback] = useState(false); // Kept for legacy ref if any
 
-    // --- SHARED CSV PARSER ---
+    // --- HELPER: CSV PARSER (RRG ONLY) ---
+    // Decoupled: This ONLY updates RRG map, does NOT touch Sentiment to avoid "Data Async" risk.
     const processCSVData = (csvText) => {
         const lines = csvText.split('\n');
         const headers = lines[0].split(',').map(h => h.trim());
@@ -160,53 +164,40 @@ const CommandCenter = () => {
 
         if (data.length > 0) {
             setRrgData(data);
-            setIsRrgLoading(false);
-            setMarketError(null);
             const groups = new Set(data.map(d => d.group || "Unclassified"));
             setGroups(['ALL', ...Array.from(groups).sort()]);
+            setIsRrgLoading(false);
 
-            // Auto-Calc Leaders
+            // Auto-Calc Leaders (Visual only - if server fails)
             setLeaders(data.sort((a, b) => b.x - a.x).slice(0, 3).map(d => d.ticker));
-
-            // Hybrid Sentiment Calc
-            const bulls = data.filter(d => d.x > 100).length;
-            const breadth = (bulls / data.length) * 2 - 1;
-            const avgMom = data.reduce((acc, d) => acc + (d.y - 100), 0) / data.length;
-            let momScore = Math.max(0, Math.min(1, (avgMom + 5) / 10)); // Normalize
-            // Breadth 0-1
-            const breadth01 = bulls / data.length;
-            const score = (0.6 * breadth01) + (0.4 * momScore);
-
-            let status = "TRUNG TÍNH (Neutral) 😐";
-            let color = "#ffea00";
-            if (score > 0.7) { status = "THAM LAM (Greed) 🐂"; color = "#00e676"; }
-            else if (score < 0.3) { status = "SỢ HÃI (Fear) 🐻"; color = "#ff1744"; }
-
-            setSentiment({
-                market_score: parseFloat(score.toFixed(2)),
-                market_status: status + " (Offline Mode)",
-                market_color: color,
-                delta: 0
-            });
         }
     };
 
-    // --- SMART FETCH (EXPONENTIAL BACKOFF) ---
-    const smartFetchData = async () => {
+    // --- LOOP 1: SMART PULSE (HIGH PRIORITY - REALTIME) ---
+    // Never falls back to CSV to ensure accuracy (MA200 check)
+    const fetchSmartPulse = async () => {
         try {
-            // 1. Try Server
-            const [sentRes, rrgRes] = await Promise.all([
-                axios.get(`${API_URL}/api/dashboard/sentiment`),
-                axios.post(`${API_URL}/api/dashboard/rrg`)
-            ]);
+            const res = await axios.get(`${API_URL}/api/dashboard/sentiment`);
+            setSentiment(res.data);
+            // Only sync leaders from server if RRG is also Online
+            if (res.data.top_movers && rrgMode !== 'OFFLINE') {
+                setLeaders(res.data.top_movers.map(m => m.ticker));
+            }
+        } catch (e) {
+            console.warn("Pulse Connect Error (Retrying in 5s...)");
+        }
+        // Always loop logic
+        if (pulseTimer.current) clearTimeout(pulseTimer.current);
+        pulseTimer.current = setTimeout(fetchSmartPulse, 30000);
+    };
 
-            // 2. Success
-            if (isManualMode.current) return; // Don't overwrite if user manually uploaded
+    // --- LOOP 2: RRG CHART (HEAVY - WITH FALLBACK) ---
+    const fetchRRGWithFallback = async () => {
+        try {
+            const res = await axios.post(`${API_URL}/api/dashboard/rrg`);
+            const rrgList = res.data.data || [];
 
-            setSentiment(sentRes.data);
-            if (sentRes.data.top_movers) setLeaders(sentRes.data.top_movers.map(m => m.ticker));
-
-            const rrgList = rrgRes.data.data || [];
+            // Transform & Set Data
             const mappedRrg = rrgList.map(item => ({
                 ticker: item.ticker,
                 x: item.rs_ratio,
@@ -214,49 +205,54 @@ const CommandCenter = () => {
                 group: item.group,
                 size: item.cap_size || 10
             }));
+
             setRrgData(mappedRrg);
             setGroups(['ALL', ...Array.from(new Set(mappedRrg.map(d => d.group))).sort()]);
-
+            setRrgMode('ONLINE');
             setIsRrgLoading(false);
-            setMarketError(false);
-            setIsUsingFallback(false);
-            retryCount.current = 0; // Reset Retry
-            setLastUpdated(new Date());
+            setMarketError(null);
+            rrgRetryCount.current = 0; // Reset retry
 
-            // Schedule Next Poll (30s)
-            if (pollingTimer.current) clearTimeout(pollingTimer.current);
-            pollingTimer.current = setTimeout(smartFetchData, 30000);
+            // If success, relax polling to 5 mins
+            if (rrgTimer.current) clearTimeout(rrgTimer.current);
+            rrgTimer.current = setTimeout(fetchRRGWithFallback, 300000);
 
         } catch (err) {
-            console.warn(`Attempt ${retryCount.current + 1} Failed:`, err);
+            console.warn(`RRG Server Fail (Attempt ${rrgRetryCount.current + 1})`);
 
-            // 3. Fallback Logic
-            if ((rrgData.length === 0 || isUsingFallback) && !isManualMode.current) {
+            // Fallback Logic
+            if (rrgData.length === 0 || rrgMode !== 'ONLINE') {
                 try {
-                    console.log("📂 Loading Backup CSV...");
+                    console.log("📂 Loading Fallback CSV...");
+                    // Use relative path for Vite/Vercel compatibility
                     const csvRes = await fetch('data/rrg_snapshot.csv');
                     if (csvRes.ok) {
                         const text = await csvRes.text();
+                        console.log("✅ CSV Loaded");
                         processCSVData(text);
-                        setIsUsingFallback(true);
+                        setRrgMode('OFFLINE');
                     } else {
-                        console.error("No Backup CSV Found");
-                        setMarketError(true);
+                        setMarketError("RRG Unavailable (Server & Backup Missing)");
                     }
-                } catch (e) { console.error("Backup Error", e); }
+                } catch (e) { console.error("Backup Data Error", e); }
             }
 
-            // 4. Backoff Schedule
-            const wait = Math.min(60000, 5000 * Math.pow(2, retryCount.current));
-            retryCount.current++;
-            if (pollingTimer.current) clearTimeout(pollingTimer.current);
-            pollingTimer.current = setTimeout(smartFetchData, wait);
+            // Exponential Backoff for RRG
+            const wait = Math.min(60000, 5000 * Math.pow(2, rrgRetryCount.current));
+            rrgRetryCount.current++;
+
+            if (rrgTimer.current) clearTimeout(rrgTimer.current);
+            rrgTimer.current = setTimeout(fetchRRGWithFallback, wait);
         }
     };
 
     useEffect(() => {
-        smartFetchData();
-        return () => clearTimeout(pollingTimer.current);
+        fetchSmartPulse();
+        fetchRRGWithFallback();
+        return () => {
+            clearTimeout(pulseTimer.current);
+            clearTimeout(rrgTimer.current);
+        };
     }, []);
 
     const checkFundamentals = async () => {
@@ -320,6 +316,7 @@ const CommandCenter = () => {
             const text = e.target.result;
             processCSVData(text); // Reuse Logic
             setIsUsingFallback(true); // Treat manual upload as fallback mode
+            setRrgMode('OFFLINE'); // Manual is technically offline
             setIsRrgLoading(false); // No longer loading from API
             setMarketError(null); // Clear any market error
         };
@@ -339,7 +336,7 @@ const CommandCenter = () => {
             </div>
 
             {/* ERROR / FALLBACK UI ... */}
-            {(marketError || isRrgLoading || rrgData.length === 0) && (
+            {(marketError || isRrgLoading && rrgData.length === 0) && (
                 <div style={{ marginBottom: '20px', padding: '10px', border: '1px dashed #333', borderRadius: '8px', textAlign: 'center' }}>
                     <p style={{ color: '#888', fontSize: '0.9em' }}>
                         {isRrgLoading && !marketError && rrgData.length === 0 ? "⏳ Đang kết nối Server..." : "⚠️ Chưa có dữ liệu RRG."}
@@ -535,6 +532,30 @@ const CommandCenter = () => {
                             </label>
                         </div>
 
+                        {/* OFFLINE WARNING BANNER */}
+                        {rrgMode === 'OFFLINE' && (
+                            <div style={{
+                                position: 'absolute',
+                                top: '50px',
+                                left: '50%',
+                                transform: 'translateX(-50%)',
+                                zIndex: 20,
+                                backgroundColor: 'rgba(255, 193, 7, 0.9)', // Amber Warning
+                                color: 'black',
+                                padding: '5px 15px',
+                                borderRadius: '4px',
+                                fontSize: '12px',
+                                fontWeight: 'bold',
+                                border: '1px solid #ffb300',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                boxShadow: '0 2px 10px rgba(0,0,0,0.3)'
+                            }}>
+                                ⚠️ RRG MODE: OFFLINE (Dữ liệu cũ) - Pulse đang là Realtime. Hãy tin theo Pulse.
+                            </div>
+                        )}
+
                         {isRrgLoading && rrgData.length === 0 ? ( // Only show loading if no data and still loading
                             <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666', flexDirection: 'column' }}>
                                 <div style={{ marginBottom: '10px' }}>Loading RRG Data (Fetching 1 Year History)...</div>
@@ -593,7 +614,7 @@ const CommandCenter = () => {
                         )}
 
                         <div style={{ position: 'absolute', bottom: '10px', right: '10px', fontSize: '10px', color: '#666' }}>
-                            {marketError ? "Source: Manual Upload" : "Source: VCI/VNStock Engine v2"}
+                            {rrgMode === 'OFFLINE' ? "Source: Offline Snapshot (CSV)" : "Source: VCI/VNStock Engine v2"}
                         </div>
                     </div>
                 </div>
