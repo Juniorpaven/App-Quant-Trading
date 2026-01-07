@@ -179,8 +179,10 @@ const CommandCenter = () => {
         try {
             const res = await axios.get(`${API_URL}/api/dashboard/sentiment`);
             setSentiment(res.data);
-            // Only sync leaders from server if RRG is also Online
-            if (res.data.top_movers && rrgMode !== 'OFFLINE') {
+
+            // FIX: Only update leaders if server actually returns valid movers
+            // This prevents blinking/clearing when SmartPulse runs in FastMode (returning [])
+            if (res.data.top_movers && res.data.top_movers.length > 0) {
                 setLeaders(res.data.top_movers.map(m => m.ticker));
             }
         } catch (e) {
@@ -197,58 +199,79 @@ const CommandCenter = () => {
             const res = await axios.post(`${API_URL}/api/dashboard/rrg`);
             const rrgList = res.data.data || [];
 
-            // Transform & Set Data
-            const mappedRrg = rrgList.map(item => ({
-                ticker: item.ticker,
-                x: item.rs_ratio,
-                y: item.rs_momentum,
-                group: item.group,
-                size: item.cap_size || 10
-            }));
+            if (rrgList.length > 0) {
+                // Transform & Set Data
+                const mappedRrg = rrgList.map(item => ({
+                    ticker: item.ticker,
+                    x: item.rs_ratio,
+                    y: item.rs_momentum,
+                    group: item.group,
+                    size: item.cap_size || 10
+                }));
 
-            setRrgData(mappedRrg);
-            setGroups(['ALL', ...Array.from(new Set(mappedRrg.map(d => d.group))).sort()]);
-            setRrgMode('ONLINE');
-            setIsRrgLoading(false);
-            setMarketError(null);
-            rrgRetryCount.current = 0; // Reset retry
+                setRrgData(mappedRrg);
+                setGroups(['ALL', ...Array.from(new Set(mappedRrg.map(d => d.group))).sort()]);
+                setRrgMode('ONLINE');
+                setIsRrgLoading(false);
+                setMarketError(null);
+                rrgRetryCount.current = 0; // Reset retry
 
-            // If success, relax polling to 5 mins
-            if (rrgTimer.current) clearTimeout(rrgTimer.current);
-            rrgTimer.current = setTimeout(fetchRRGWithFallback, 300000);
+                // Force update leaders from ONLINE RRG if available
+                const rrgLeaders = mappedRrg.sort((a, b) => b.x - a.x).slice(0, 3).map(d => d.ticker);
+                if (rrgLeaders.length > 0) setLeaders(rrgLeaders);
 
+                // If success, relax polling to 5 mins
+                if (rrgTimer.current) clearTimeout(rrgTimer.current);
+                rrgTimer.current = setTimeout(fetchRRGWithFallback, 300000);
+                return; // STOP HERE, DON'T RUN FALLBACK
+            }
         } catch (err) {
             console.warn(`RRG Server Fail (Attempt ${rrgRetryCount.current + 1})`);
-
-            // Fallback Logic
-            if (rrgData.length === 0 || rrgMode !== 'ONLINE') {
-                try {
-                    console.log("📂 Loading Fallback CSV...");
-                    // Use relative path for Vite/Vercel compatibility
-                    const csvRes = await fetch('data/rrg_snapshot.csv');
-                    if (csvRes.ok) {
-                        const text = await csvRes.text();
-                        console.log("✅ CSV Loaded");
-                        processCSVData(text);
-                        setRrgMode('OFFLINE');
-                    } else {
-                        setMarketError("RRG Unavailable (Server & Backup Missing)");
-                    }
-                } catch (e) { console.error("Backup Data Error", e); }
-            }
-
-            // Exponential Backoff for RRG
-            const wait = Math.min(60000, 5000 * Math.pow(2, rrgRetryCount.current));
-            rrgRetryCount.current++;
-
-            if (rrgTimer.current) clearTimeout(rrgTimer.current);
-            rrgTimer.current = setTimeout(fetchRRGWithFallback, wait);
         }
+
+        // --- FALLBACK LOGIC (Run if catch block hit OR rrgList empty) ---
+        // Only load CSV if we aren't already Online or if Data is empty
+        if (rrgData.length === 0 || rrgMode !== 'ONLINE') {
+            try {
+                // Use relative path for Vite/Vercel compatibility
+                const csvRes = await fetch('data/rrg_snapshot.csv');
+                if (csvRes.ok) {
+                    const text = await csvRes.text();
+                    processCSVData(text);
+                    setRrgMode('OFFLINE');
+                    // Note: processCSVData already sets Leaders!
+                } else {
+                    setMarketError("RRG Unavailable (Server & Backup Missing)");
+                }
+            } catch (e) { console.error("Backup Data Error", e); }
+        }
+
+        // Exponential Backoff
+        const wait = Math.min(60000, 5000 * Math.pow(2, rrgRetryCount.current));
+        rrgRetryCount.current++;
+        if (rrgTimer.current) clearTimeout(rrgTimer.current);
+        rrgTimer.current = setTimeout(fetchRRGWithFallback, wait);
     };
 
     useEffect(() => {
-        fetchSmartPulse();
-        fetchRRGWithFallback();
+        // STRATEGY: "CSV FIRST" (Instant UX)
+        // 1. Load CSV immediately to show valid data + Leaders
+        const loadInitialCSV = async () => {
+            try {
+                const csvRes = await fetch('data/rrg_snapshot.csv');
+                if (csvRes.ok) {
+                    const text = await csvRes.text();
+                    processCSVData(text); // This also sets Leaders!
+                    setRrgMode('LOADING'); // Still mark as loading until real server confirms
+                }
+            } catch (e) { }
+        };
+        loadInitialCSV();
+
+        // 2. Then start polling Server
+        fetchSmartPulse(); // Fast
+        fetchRRGWithFallback(); // Slow but will overwrite CSV if success
+
         return () => {
             clearTimeout(pulseTimer.current);
             clearTimeout(rrgTimer.current);

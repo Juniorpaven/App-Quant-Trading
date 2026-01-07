@@ -609,15 +609,60 @@ def get_data(tickers, period="5y"):
 
 
 def calculate_rrg_data(tickers, benchmark="^VNINDEX"): # Sử dụng VNINDEX làm bench
-    # 1. Fetch Data (Price History)
-    all_tickers = tickers + [benchmark]
-    # Use cached get_data instead of direct yf.download
-    # This caches results for 4 hours, making subsequent RRG loads instant
-    try:
-        data = get_data(all_tickers, period="1y")
-    except Exception as e:
-        print(f"RRG Data Fetch Error: {e}")
-        return []
+    data = None
+    
+    # --- ORACLE STITCHING OPTIMIZATION ---
+    # If using standard VN30 list and Oracle is ready, use cached history + live stitching
+    use_oracle = False
+    
+    # Check if Oracle is ready and contains history
+    if SMART_PULSE_ORACLE.get("status") == "READY" and SMART_PULSE_ORACLE.get("history_df") is not None:
+        # Check if requested tickers are subset of cached tickers (VN30 + Index)
+        # We need to ensure we have data for requested tickers
+        cached_df = SMART_PULSE_ORACLE["history_df"]
+        missing_tickers = [t for t in tickers if t not in cached_df.columns]
+        
+        if not missing_tickers:
+            use_oracle = True
+            try:
+                # 1. Get History Base
+                full_history = cached_df.copy()
+                
+                # 2. Fetch Live '1d' Snapshot (Fast)
+                all_tickers = tickers + [benchmark]
+                # Auto-append .VN if needed (reuse get_data logic implies we have sanitized tickers here?)
+                # Assuming tickers passed here are already sanitized or we rely on yf
+                # For safety, clean tickers again locally or trust caller
+                
+                # Actually, get_data cleans them. Let's do raw yf here for speed or use get_data('1d')?
+                # get_data handles cleaning.
+                live_data = get_data(all_tickers, period="1d")
+                
+                if live_data is not None and not live_data.empty:
+                    # 3. Stitch
+                    # Concatenate and handle overlap (e.g. if Oracle T-1 matches Live T-1)
+                    # Simple concat
+                    data = pd.concat([full_history, live_data])
+                    
+                    # Deduplicate indices (keep last)
+                    data = data[~data.index.duplicated(keep='last')]
+                else:
+                    data = full_history # Fallback to just history if live fetch fails
+                    
+                print("⚡ RRG: Using Oracle Stitched Data (Instant)")
+            except Exception as e:
+                print(f"RRG Stitch Error: {e}, falling back to slow fetch")
+                use_oracle = False
+
+    if not use_oracle:
+        # SLOW PATH (Legacy)
+        # 1. Fetch Data (Price History)
+        all_tickers = tickers + [benchmark]
+        try:
+            data = get_data(all_tickers, period="1y")
+        except Exception as e:
+            print(f"RRG Data Fetch Error: {e}")
+            return []
 
     if data is None or data.empty:
         return []
@@ -925,7 +970,8 @@ SMART_PULSE_ORACLE = {
     "ma200_map": {},          # {ticker: ma200_value_yesterday}
     "price_t20_map": {},      # {ticker: price_20_days_ago} 
     "mom_history_array": [],  # List of past market momentum values for ranking
-    "breadth_t1": 0.5,        
+    "breadth_t1": 0.5,
+    "history_df": None,       # NEW: Store full history DataFrame for RRG Stitching
     "status": "EMPTY"         
 }
 
@@ -967,6 +1013,9 @@ def update_smart_pulse_oracle():
         if len(data) < 260: 
             print(f"⚡ ORACLE FAIL: Not enough history (Got {len(data)} days)")
             return False
+
+        # --- SAVE HISTORY FOR RRG STITCHING ---
+        SMART_PULSE_ORACLE["history_df"] = data.copy()
 
         # 2. Pre-calculate Static Metrics (Everything based on T-1)
         
