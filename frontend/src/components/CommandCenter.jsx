@@ -366,15 +366,58 @@ const CommandCenter = () => {
 
             {/* ERROR / FALLBACK UI ... */}
             {(marketError || isRrgLoading && rrgData.length === 0) && (
-                <div style={{ marginBottom: '20px', padding: '10px', border: '1px dashed #333', borderRadius: '8px', textAlign: 'center' }}>
-                    <p style={{ color: '#888', fontSize: '0.9em' }}>
-                        {isRrgLoading && !marketError && rrgData.length === 0 ? "⏳ Đang kết nối Server..." : "⚠️ Chưa có dữ liệu RRG."}
+                <div style={{ marginBottom: '20px', padding: '15px', border: '1px dashed #444', borderRadius: '12px', textAlign: 'center', backgroundColor: '#1e1e1e' }}>
+                    <p style={{ color: '#aaa', fontSize: '0.9em', marginBottom: '15px' }}>
+                        {isRrgLoading && !marketError && rrgData.length === 0 ? "⏳ Đang kết nối Server..." : "⚠️ Hệ thống đang bận. Dùng công cụ thủ công:"}
                     </p>
-                    <label style={{ display: 'inline-block', marginTop: '10px', padding: '8px 16px', backgroundColor: '#212121', border: '1px solid #444', borderRadius: '4px', cursor: 'pointer', fontSize: '0.9em', color: '#00e676' }}>
-                        📂 Nạp File Snapshot (RRG)
-                        <input type="file" accept=".csv" onChange={handleFileUpload} style={{ display: 'none' }} />
-                    </label>
-                    <div style={{ fontSize: '10px', color: '#666', marginTop: '5px' }}>Dùng file CSV từ Colab để xem ngay nếu Server chậm.</div>
+
+                    <div style={{ display: 'flex', gap: '15px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                        {/* 1. COLAB BUTTON */}
+                        <a
+                            href="https://colab.research.google.com/"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                padding: '10px 20px',
+                                backgroundColor: '#ff6f00',
+                                color: 'white',
+                                textDecoration: 'none',
+                                borderRadius: '6px',
+                                border: '1px solid #ff8f00',
+                                fontSize: '0.9em',
+                                fontWeight: 'bold',
+                                boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
+                            }}
+                        >
+                            🚀 Mở Máy Tính Colab
+                        </a>
+
+                        {/* 2. UPLOAD BUTTON */}
+                        <label style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            padding: '10px 20px',
+                            backgroundColor: '#212121',
+                            border: '1px solid #444',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontSize: '0.9em',
+                            color: '#00e676',
+                            fontWeight: 'bold',
+                            boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
+                        }}>
+                            📂 Nạp File Snapshot (RRG)
+                            <input type="file" accept=".csv" onChange={handleFileUpload} style={{ display: 'none' }} />
+                        </label>
+                    </div>
+
+                    <div style={{ fontSize: '11px', color: '#666', marginTop: '10px' }}>
+                        Quy trình: Bấm nút Colab → Chạy (Ctrl+F9) → Tải file CSV về → Bấm nút Nạp ở trên.
+                    </div>
                 </div>
             )}
 
