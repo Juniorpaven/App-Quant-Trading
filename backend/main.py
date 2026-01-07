@@ -911,130 +911,191 @@ def backtest_endpoint(req: BacktestRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# --- GLOBAL CACHE FOR SMART PULSE (The "Static" Base) ---
+SMART_PULSE_ORACLE = {
+    "last_updated": None,      
+    "ma200_map": {},          # {ticker: ma200_value_yesterday}
+    "price_t20_map": {},      # {ticker: price_20_days_ago} 
+    "mom_history_array": [],  # List of past market momentum values for ranking
+    "breadth_t1": 0.5,        
+    "status": "EMPTY"         
+}
+
+def update_smart_pulse_oracle():
+    """Heavy operation: Runs ONCE per day (or on restart) to build the static base."""
+    global SMART_PULSE_ORACLE
+    print("⚡ ORACLE: Building Static Market Base (2Y History)...")
+    
+    try:
+        # 1. Fetch Heavy History
+        full_list = VN30_LIST + ["^VNINDEX"]
+        data = yf.download(full_list, period="2y", progress=False, auto_adjust=False)['Adj Close']
+        
+        if data.empty:
+            print("⚡ ORACLE FAIL: No Data")
+            SMART_PULSE_ORACLE["status"] = "ERROR"
+            return False
+
+        if isinstance(data, pd.Series): data = data.to_frame()
+        data = data.ffill().dropna() 
+        
+        if len(data) < 260: 
+            print("⚡ ORACLE FAIL: Not enough history")
+            return False
+
+        # 2. Pre-calculate Static Metrics (Everything based on T-1)
+        
+        # A. MA200 Reference (from T-1)
+        ma200_series = data.rolling(window=200).mean().iloc[-1] 
+        SMART_PULSE_ORACLE["ma200_map"] = ma200_series.to_dict()
+
+        # B. Momentum Reference (Price T-20)
+        # We need Price 20 days ago from END (Index -20)
+        price_t20_series = data.iloc[-20]
+        SMART_PULSE_ORACLE["price_t20_map"] = price_t20_series.to_dict()
+
+        # C. Momentum History (For Percentile Rank)
+        basket_cols = [c for c in data.columns if c != "^VNINDEX"]
+        basket_daily_ret = data[basket_cols].pct_change(fill_method=None).mean(axis=1)
+        mom_curve = basket_daily_ret.rolling(window=20).mean() * 20 
+        
+        # Store last 252 points (minus closest day to avoid overlap if needed, but T-1 is fine)
+        # We take history UP TO T-1
+        valid_history = mom_curve.dropna().iloc[-253:-1].values 
+        SMART_PULSE_ORACLE["mom_history_array"] = valid_history
+
+        # D. Breadth Reference (T-1)
+        benchmark = data["^VNINDEX"]
+        beats = 0
+        total = 0
+        for t in VN30_LIST:
+            if t not in data.columns: continue
+            rs = 100 * (data[t] / benchmark)
+            rs_ma = rs.rolling(window=10).mean()
+            if rs_ma.iloc[-1] > 100: beats += 1 
+            total += 1
+        SMART_PULSE_ORACLE["breadth_t1"] = beats / total if total > 0 else 0
+
+        SMART_PULSE_ORACLE["last_updated"] = datetime.now()
+        SMART_PULSE_ORACLE["status"] = "READY"
+        print("✅ ORACLE: Static Base Ready.")
+        return True
+
+    except Exception as e:
+        print(f"⚡ ORACLE EXCEPTION: {e}")
+        SMART_PULSE_ORACLE["status"] = "ERROR"
+        return False
+
 @app.get("/api/dashboard/sentiment")
 def get_dashboard_sentiment():
     try:
-        # --- SMART PULSE LOGIC WITH DELTA (T-0 vs T-1) ---
-        
-        # 1. Fetch Data (Must include VNINDEX for accurate RRG Breadth)
+        # 1. CHECK & WARM UP ORACLE
+        is_stale = False
+        if SMART_PULSE_ORACLE["last_updated"]:
+            age = datetime.now() - SMART_PULSE_ORACLE["last_updated"]
+            if age.total_seconds() > 43200: is_stale = True # 12 hours
+
+        if SMART_PULSE_ORACLE["status"] != "READY" or is_stale:
+            success = update_smart_pulse_oracle()
+            if not success:
+                # Soft Fail
+                return {
+                    "market_score": 0.5, 
+                    "market_status": "Starting Up (Warming Cache)...", 
+                    "market_color": "#888", 
+                    "delta": 0,
+                    "top_movers": []
+                }
+
+        # 2. FAST TICK (The "Dynamic" Pulse) - ONLY 1 DAY
         full_list = VN30_LIST + ["^VNINDEX"]
-        data = get_data(full_list, period="2y") 
-        if data.empty or "^VNINDEX" not in data.columns:
-             return {"market_score": 0, "market_status": "No Data", "delta": 0, "top_movers": []}
+        try:
+            live_data = yf.download(full_list, period="1d", progress=False, auto_adjust=False)['Adj Close']
+        except:
+             return {"market_score": 0.5, "market_status": "Live Data Lag...", "market_color": "#888", "delta": 0, "top_movers": []}
 
-        # 2. RS-RATIO BREADTH CALCULATION (For T-0 and T-1)
-        # Re-calc locally to get history
-        benchmark = data["^VNINDEX"]
-        breadth_scores = [] # [Score_T1, Score_T0]
+        if live_data.empty:
+             # If no live data (weekend/holiday), use static Snapshot
+             # But if static is ready, better return that than nothing?
+             return {"market_score": 0.5, "market_status": "Market Closed", "market_color": "#888", "delta": 0, "top_movers": []}
+
+        current_prices = live_data.iloc[-1] 
         
-        # We need the last 2 days indices
-        # Ensure we have enough data
-        if len(data) < 20: return {"market_score": 0, "market_status": "No Data", "delta": 0}
+        # 3. INCREMENTAL CALC (Merge Static + Dynamic)
         
-        # Indices for T-1 (Yesterday) and T-0 (Today)
-        # Note: pct_change etc might produce NaNs at start, so tail is safe
-        target_indices = [-2, -1] 
+        # A. BREADTH (Proxy: Use T-1 Static Base)
+        breadth_t0 = SMART_PULSE_ORACLE["breadth_t1"] 
+
+        # B. MOMENTUM (Live Calc)
+        # Mom = Current_Price / Price_T20 (from Oracle) - 1
+        t20_map = SMART_PULSE_ORACLE["price_t20_map"]
         
-        # Pre-calc RS Ratio for all stocks
-        # RS = 100 * (Price / Bench). RS-Ratio = MA10(RS)
-        # Optimize: Calculate Rolling only for columns in VN30_LIST
-        rs_above_100_counts = [0, 0] # [Count_T1, Count_T0]
-        valid_tickers_count = 0
-        
+        basket_moms = []
         for t in VN30_LIST:
-            if t not in data.columns: continue
-            valid_tickers_count += 1
-            
-            rs_raw = 100 * (data[t] / benchmark)
-            rs_ratio = rs_raw.rolling(window=10).mean()
-            
-            # Check T-1
-            if rs_ratio.iloc[-2] > 100: rs_above_100_counts[0] += 1
-            # Check T-0
-            if rs_ratio.iloc[-1] > 100: rs_above_100_counts[1] += 1
-            
-        breadth_t1 = rs_above_100_counts[0] / valid_tickers_count if valid_tickers_count else 0
-        breadth_t0 = rs_above_100_counts[1] / valid_tickers_count if valid_tickers_count else 0
+            if t in current_prices and t in t20_map:
+                p_now = current_prices[t]
+                p_old = t20_map[t]
+                if p_old > 0:
+                    ret = (p_now / p_old) - 1
+                    basket_moms.append(ret)
+        
+        curr_mom_val = sum(basket_moms) / len(basket_moms) if basket_moms else 0
 
-        # --- MOMENTUM SCORE (Percentile Rank) ---
-        # Basket Return Proxy
-        # Exclude VNINDEX from "VN30 Basket Momentum"
-        basket_cols = [c for c in data.columns if c != "^VNINDEX"]
-        basket_daily_ret = data[basket_cols].pct_change(fill_method=None).mean(axis=1)
+        # Rank T0 vs History
+        hist_moms = SMART_PULSE_ORACLE["mom_history_array"] 
+        mom_score_t0 = 0.5
+        if len(hist_moms) > 0:
+            mom_score_t0 = stats.percentileofscore(hist_moms, curr_mom_val) / 100.0
         
-        # Rolling 20d return
-        mom_series = basket_daily_ret.rolling(window=20).mean() * 20
-        mom_series = mom_series.dropna()
+        # C. REGIME (Live Calc: Basket Price vs Oracle MA200)
+        ma200_map = SMART_PULSE_ORACLE["ma200_map"]
         
-        mom_scores = [0.5, 0.5]
-        if len(mom_series) > 255:
-            # T-1 Logic
-            hist_window_t1 = mom_series.iloc[-253:-1] # Past 252 days relative to T-1
-            curr_mom_t1 = mom_series.iloc[-2]
-            mom_scores[0] = stats.percentileofscore(hist_window_t1, curr_mom_t1) / 100.0
-            
-            # T-0 Logic (Today)
-            hist_window_t0 = mom_series.iloc[-252:]
-            curr_mom_t0 = mom_series.iloc[-1]
-            mom_scores[1] = stats.percentileofscore(hist_window_t0, curr_mom_t0) / 100.0
+        basket_now_vals = [current_prices[t] for t in VN30_LIST if t in current_prices]
+        basket_price_now = sum(basket_now_vals) / len(basket_now_vals) if basket_now_vals else 0
+        
+        ma_vals = [ma200_map[t] for t in VN30_LIST if t in ma200_map]
+        basket_ma200_ref = sum(ma_vals) / len(ma_vals) if ma_vals else 0
+        
+        regime_mul = 1.0
+        if basket_price_now < basket_ma200_ref: regime_mul = 0.7
 
-        # --- REGIME FILTER (MA200) ---
-        basket_price = data[basket_cols].mean(axis=1)
-        ma200_series = basket_price.rolling(window=200).mean()
+        # 4. FINAL SCORES
+        final_score = (0.6 * breadth_t0 + 0.4 * mom_score_t0) * regime_mul
         
-        regime_multipliers = [1.0, 1.0]
+        # Delta Proxy: Compare vs Mom T-1 Score (from History Tail)
+        # We assume Breadth didn't change drastically in 1 session for Delta purposes in Fast Mode
+        last_hist_val = hist_moms[-1] if len(hist_moms) > 0 else 0
+        mom_score_t1 = stats.percentileofscore(hist_moms[:-1], last_hist_val) / 100.0 if len(hist_moms) > 1 else 0.5
         
-        # T-1 Regime
-        if basket_price.iloc[-2] < ma200_series.iloc[-2]: regime_multipliers[0] = 0.7
-        # T-0 Regime
-        if basket_price.iloc[-1] < ma200_series.iloc[-1]: regime_multipliers[1] = 0.7
+        # Reconstruct T-1 Score (assuming Regime T-1 ~ Regime T-0 for delta context, or use strict history)
+        # regime T-1 check:
+        # We don't have Price T-1 easily here without fetching history again. 
+        # Assume Regime unchanged for Delta visual.
+        score_t1_approx = (0.6 * breadth_t0 + 0.4 * mom_score_t1) * regime_mul 
         
-        # --- FINAL SCORES & DELTA ---
-        # SmartPulse = (0.6*Breadth + 0.4*Mom) * Regime
-        
-        score_t1 = (0.6 * breadth_t1 + 0.4 * mom_scores[0]) * regime_multipliers[0]
-        score_t0 = (0.6 * breadth_t0 + 0.4 * mom_scores[1]) * regime_multipliers[1]
-        
-        delta = score_t0 - score_t1
-        
-        # --- DISPLAY STATUS (For T-0) ---
-        smart_pulse_score = round(score_t0, 2)
-        
+        delta = final_score - score_t1_approx
+
+        # DISPLAY
+        smart_pulse_score = round(final_score, 2)
         status = "TRUNG TÍNH (Neutral) 😐"
-        color = "#ffea00"
+        d_color = "#ffea00"
         if smart_pulse_score < 0.3:
             status = "SỢ HÃI (Fear) 🐻 - Cash King"
-            color = "#ff1744"
+            d_color = "#ff1744"
         elif smart_pulse_score > 0.7:
             status = "THAM LAM (Greed) 🐂 - Full Margin"
-            color = "#00e676"
-            
-        # --- RE-USE RRG API FOR MOVERS (To avoid duplicating logic 3rd time) ---
-        # Or just use the Breadth loop? No, movers leverage RS Momentum too. 
-        # Let's call calculate_rrg_data safely.
-        rrg_data = calculate_rrg_data(VN30_LIST) 
-        leaders = sorted(rrg_data, key=lambda d: d['x'], reverse=True)
-        top_3 = []
-        for item in leaders[:3]:
-            s = item['x']
-            action = "DẪN DẮT A+" if s > 102 else "MẠNH"
-            top_3.append({"ticker": item['ticker'], "score": s, "action": action})
+            d_color = "#00e676"
 
         return {
             "market_score": smart_pulse_score,
             "market_status": status,
-            "market_color": color,
-            "delta": round(delta, 2), # New Delta Field
-            "top_movers": top_3,
-            "debug_info": {
-                "t0_stats": f"B:{breadth_t0:.2f} M:{mom_scores[1]:.2f} R:{regime_multipliers[1]}",
-                "t1_stats": f"B:{breadth_t1:.2f} M:{mom_scores[0]:.2f} R:{regime_multipliers[0]}",
-                "delta_val": delta
-            }
+            "market_color": d_color,
+            "delta": round(delta, 2),
+            "top_movers": [] # Frontend handles its own or use RRG leaders
         }
     except Exception as e:
-        print(f"Sentiment Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Sentiment Fast-Path Error: {e}")
+        return {"market_score": 0, "market_status": "Connecting...", "delta": 0, "top_movers": []}
 
 @app.post("/api/dashboard/rrg")
 def get_dashboard_rrg(req: Optional[NTFRequest] = None):
