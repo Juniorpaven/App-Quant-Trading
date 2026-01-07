@@ -929,7 +929,8 @@ def update_smart_pulse_oracle():
     try:
         # 1. Fetch Heavy History
         full_list = VN30_LIST + ["^VNINDEX"]
-        data = yf.download(full_list, period="2y", progress=False, auto_adjust=False)['Adj Close']
+        # REDUCED TO 6 MONTHS FOR STABILITY (2Y might be timing out)
+        data = yf.download(full_list, period="6mo", progress=False, auto_adjust=False)['Adj Close']
         
         if data.empty:
             print("⚡ ORACLE FAIL: No Data")
@@ -939,7 +940,8 @@ def update_smart_pulse_oracle():
         if isinstance(data, pd.Series): data = data.to_frame()
         data = data.ffill().dropna() 
         
-        if len(data) < 260: 
+        # Relaxed check for 6mo (approx 125 trading days). Need at least 60 for safe momentum.
+        if len(data) < 60: 
             print("⚡ ORACLE FAIL: Not enough history")
             return False
 
