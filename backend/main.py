@@ -938,6 +938,19 @@ def update_smart_pulse_oracle():
             return False
 
         if isinstance(data, pd.Series): data = data.to_frame()
+        
+        # --- HANDLE MISSING VNINDEX (CRITICAL FIX) ---
+        # Yahoo often fails to fetch ^VNINDEX. We fallback to Synthetic VN30 Mean.
+        if "^VNINDEX" not in data.columns or data["^VNINDEX"].isna().all():
+            print("⚠️ VNINDEX missing or empty. Using Synthetic VN30 Benchmark.")
+            # Calculate mean of available VN30 columns
+            available_cols = [c for c in data.columns if c in VN30_LIST]
+            if available_cols:
+                data["^VNINDEX"] = data[available_cols].mean(axis=1)
+            else:
+                print("⚡ ORACLE FAIL: No valid stock data to build benchmark")
+                return False
+
         data = data.ffill().dropna() 
         
         # Relaxed check for 6mo (approx 125 trading days). Need at least 60 for safe momentum.
@@ -948,8 +961,17 @@ def update_smart_pulse_oracle():
         # 2. Pre-calculate Static Metrics (Everything based on T-1)
         
         # A. MA200 Reference (from T-1)
-        ma200_series = data.rolling(window=200).mean().iloc[-1] 
-        SMART_PULSE_ORACLE["ma200_map"] = ma200_series.to_dict()
+        # Note: With 6mo data, we CANNOT calculate true MA200.
+        # ADAPTATION: Use MA50 as proxy for "Long Term Trend" in this lightweight mode?
+        # OR: Accept that first 140 days of MA200 are NaN?
+        # If we have < 200 days, MA200 will be NaN.
+        # FIX: Use whatever max window we have (e.g. MA50) if length is short.
+        window_size = 200
+        if len(data) < 200:
+            window_size = 50 
+        
+        ma_series = data.rolling(window=window_size).mean().iloc[-1] 
+        SMART_PULSE_ORACLE["ma200_map"] = ma_series.to_dict() # Actually checks MA50 if data short
 
         # B. Momentum Reference (Price T-20)
         # We need Price 20 days ago from END (Index -20)
@@ -963,7 +985,8 @@ def update_smart_pulse_oracle():
         
         # Store last 252 points (minus closest day to avoid overlap if needed, but T-1 is fine)
         # We take history UP TO T-1
-        valid_history = mom_curve.dropna().iloc[-253:-1].values 
+        # With 6mo data, we have ~120 points. We take what we have.
+        valid_history = mom_curve.dropna().iloc[:-1].values 
         SMART_PULSE_ORACLE["mom_history_array"] = valid_history
 
         # D. Breadth Reference (T-1)
