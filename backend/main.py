@@ -984,18 +984,17 @@ SMART_PULSE_ORACLE = {
 def update_smart_pulse_oracle():
     """Heavy operation: Runs ONCE per day (or on restart) to build the static base."""
     global SMART_PULSE_ORACLE
-    print("⚡ ORACLE: Building Static Market Base (2Y History)...")
+    print("⚡ ORACLE: Building Static Market Base (1Y History)...")
     
     try:
         # 1. Fetch Heavy History
         full_list = VN30_LIST + ["^VNINDEX"]
-        # 1. Fetch Heavy History
-        full_list = VN30_LIST + ["^VNINDEX"]
-        # RESTORE TO 2 YEARS FOR FULL ACCURACY
-        data = yf.download(full_list, period="2y", progress=False, auto_adjust=False)['Adj Close']
+
+        # OPTIMIZATION: Reduce to 1y to prevent Render OOM (Out of Memory)
+        data = yf.download(full_list, period="1y", progress=False, auto_adjust=False)['Adj Close']
         
         if data.empty:
-            print("⚡ ORACLE FAIL: No Data")
+            print("⚡ ORACLE FAIL: No Data from Yahoo.")
             SMART_PULSE_ORACLE["status"] = "ERROR"
             return False
 
