@@ -32,7 +32,15 @@ app.add_middleware(
 DATA_CACHE_V2 = {}
 
 def get_data(tickers, period="5y"): # Lấy 5 năm để OPS học tốt hơn
-    tickers = [t.strip().upper() for t in tickers]
+    # Auto-fix tickers: Add .VN if missing (excluding Indices like ^VNINDEX)
+    clean_tickers = []
+    for t in tickers:
+        t = t.strip().upper()
+        if not t.startswith("^") and ".VN" not in t:
+            t += ".VN"
+        clean_tickers.append(t)
+        
+    tickers = clean_tickers
     key = (tuple(sorted(tickers)), period)
     
     if key in DATA_CACHE_V2 and (datetime.now() - DATA_CACHE_V2[key][0] < timedelta(hours=4)):
