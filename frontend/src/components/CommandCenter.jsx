@@ -390,8 +390,13 @@ const CommandCenter = () => {
                                 {rrgData.slice(0, 5).map((d, i) => (
                                     <tr key={i} style={{ borderBottom: '1px solid #333' }}>
                                         <td style={{ padding: '5px' }}>{d.ticker}</td>
-                                        <td style={{ padding: '5px', color: d.x > 100 ? '#00e676' : '#ff1744' }}>{d.x.toFixed(2)}</td>
-                                        <td style={{ padding: '5px', color: d.y > 100 ? '#00e676' : '#ff1744' }}>{d.y.toFixed(2)}</td>
+                                        {/* FIX: Use Safe Check for Numbers to prevent Crash */}
+                                        <td style={{ padding: '5px', color: (d.x || 0) > 100 ? '#00e676' : '#ff1744' }}>
+                                            {d.x ? Number(d.x).toFixed(2) : "0.00"}
+                                        </td>
+                                        <td style={{ padding: '5px', color: (d.y || 0) > 100 ? '#00e676' : '#ff1744' }}>
+                                            {d.y ? Number(d.y).toFixed(2) : "0.00"}
+                                        </td>
                                         <td style={{ padding: '5px' }}>{d.group}</td>
                                     </tr>
                                 ))}
