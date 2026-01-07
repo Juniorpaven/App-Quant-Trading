@@ -579,8 +579,32 @@ const CommandCenter = () => {
                         boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
                         minHeight: '400px'
                     }}>
-                        <div style={{ position: 'absolute', top: '15px', left: '15px', display: 'flex', gap: '10px', zIndex: 10, alignItems: 'center' }}>
-                            <span style={{ fontSize: '12px', color: '#00e5ff', display: 'flex', alignItems: 'center' }}>🟦 RELATIVE ROTATION GRAPH (RRG)</span>
+                        <div style={{ position: 'absolute', top: '15px', left: '15px', display: 'flex', gap: '10px', zIndex: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: '12px', color: '#00e5ff', display: 'flex', alignItems: 'center', fontWeight: 'bold' }}>🟦 RELATIVE ROTATION GRAPH (RRG)</span>
+
+                            {/* PERMANENT COLAB BUTTON */}
+                            <a
+                                href="https://colab.research.google.com/"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{
+                                    textDecoration: 'none',
+                                    fontSize: '10px',
+                                    color: '#ff9800',
+                                    border: '1px solid #ff9800',
+                                    padding: '2px 8px',
+                                    borderRadius: '4px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    marginLeft: '5px',
+                                    cursor: 'pointer',
+                                    backgroundColor: 'rgba(255, 152, 0, 0.1)'
+                                }}
+                                title="Mở Colab để cập nhật dữ liệu khi cần"
+                            >
+                                🚀 Colab
+                            </a>
 
                             {/* SECTOR SELECTOR */}
                             {groups.length > 0 && (
@@ -594,7 +618,7 @@ const CommandCenter = () => {
                                         padding: '2px 5px',
                                         borderRadius: '4px',
                                         fontSize: '11px',
-                                        marginLeft: '10px'
+                                        marginLeft: '5px'
                                     }}
                                 >
                                     {groups.map(g => <option key={g} value={g}>{g}</option>)}
@@ -602,7 +626,7 @@ const CommandCenter = () => {
                             )}
 
                             {/* PERMANENT UPLOAD TRIGGER */}
-                            <label style={{ cursor: 'pointer', fontSize: '10px', color: '#666', textDecoration: 'underline', marginLeft: '10px' }}>
+                            <label style={{ cursor: 'pointer', fontSize: '10px', color: '#666', textDecoration: 'underline', marginLeft: '5px', display: 'flex', alignItems: 'center' }}>
                                 (📂 Nạp CSV)
                                 <input type="file" accept=".csv" onChange={handleFileUpload} style={{ display: 'none' }} />
                             </label>
