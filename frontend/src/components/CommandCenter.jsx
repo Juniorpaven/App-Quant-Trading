@@ -40,15 +40,21 @@ const Plot = React.lazy(() => import('react-plotly.js'));
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 const CommandCenter = () => {
-    // ... (state remains)
-    const [sentiment, setSentiment] = useState(null);
+    // --- STATE MANAGEMENT ---
+    const [sentiment, setSentiment] = useState({
+        market_score: 0.5,
+        market_status: "Starting Up...",
+        market_color: "#555",
+        delta: 0,
+        top_movers: []
+    }); // Default State to prevent disappearance
     const [rrgData, setRrgData] = useState([]);
     const [fundTicker, setFundTicker] = useState("HPG");
     const [fundData, setFundData] = useState(null);
     const [loadingFund, setLoadingFund] = useState(false);
     const [isRrgLoading, setIsRrgLoading] = useState(true);
     const [marketError, setMarketError] = useState(false);
-    const [leaders, setLeaders] = useState([]);
+    const [leaders, setLeaders] = useState([]); // Separate leaders state for reliability
     const [chartData, setChartData] = useState(null);
     const [isChartLoading, setIsChartLoading] = useState(false);
     const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
@@ -438,87 +444,86 @@ const CommandCenter = () => {
                     </button>
 
                     {/* MARKET PULSE HEADER (REIMAGINED) */}
-                    {sentiment && (
-                        <div id="market-pulse-section" style={{
-                            display: 'grid',
-                            gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
-                            gap: '20px',
-                            padding: '15px',
-                            backgroundColor: '#1e1e1e',
-                            borderRadius: '12px',
-                            border: '1px solid #333',
-                            boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
-                            position: 'relative'
-                        }}>
-                            {/* Button removed from here */}
+                    <div id="market-pulse-section" style={{
+                        display: 'grid',
+                        gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
+                        gap: '20px',
+                        padding: '15px',
+                        backgroundColor: '#1e1e1e',
+                        borderRadius: '12px',
+                        border: '1px solid #333',
+                        boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+                        position: 'relative'
+                    }}>
+                        {/* Button removed from here */}
 
-                            {/* LEFT: SENTIMENT */}
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px' }}>
-                                <div style={{ textAlign: 'center' }}>
-                                    <div style={{ fontSize: '10px', color: '#888', textTransform: 'uppercase', letterSpacing: '1px' }}>SMART PULSE (VN30)</div>
-                                    <h3 style={{ margin: '5px 0', fontSize: '1.8em', color: sentiment.market_color }}>{sentiment.market_status}</h3>
-                                    <div style={{ fontSize: '2em', fontWeight: 'bold', color: sentiment.market_color }}>
-                                        {sentiment.market_score}
-                                        {/* DELTA DISPLAY */}
-                                        {sentiment.delta !== undefined && (
-                                            <span style={{ fontSize: '0.5em', marginLeft: '10px', color: sentiment.delta > 0 ? '#00e676' : (sentiment.delta < 0 ? '#ff1744' : '#888') }}>
-                                                {sentiment.delta > 0 ? "↗️" : (sentiment.delta < 0 ? "↘️" : "➖")}
-                                                {sentiment.delta > 0 ? "+" : ""}{sentiment.delta}
-                                            </span>
-                                        )}
-                                    </div>
-                                </div>
-
-                                {/* Mini Gauge Chart */}
-                                <div style={{ width: '120px', height: '60px' }}>
-                                    <ErrorBoundary>
-                                        <Suspense fallback={<div>...</div>}>
-                                            <Plot
-                                                data={[{
-                                                    type: "indicator",
-                                                    mode: "gauge",
-                                                    value: sentiment.market_score, // Now 0..1
-                                                    gauge: {
-                                                        axis: { range: [0, 1], visible: false },
-                                                        bar: { color: sentiment.market_color }, // Dynamic color from backend
-                                                        bgcolor: "#333",
-                                                        borderwidth: 0,
-                                                        steps: [
-                                                            { range: [0, 0.3], color: "rgba(239, 83, 80, 0.3)" }, // RED Zone (Fear)
-                                                            { range: [0.3, 0.7], color: "rgba(117, 117, 117, 0.3)" }, // GREY Zone (Neutral)
-                                                            { range: [0.7, 1], color: "rgba(102, 187, 106, 0.3)" } // GREEN Zone (Greed)
-                                                        ]
-                                                    }
-                                                }]}
-                                                layout={{ width: 120, height: 60, margin: { t: 0, b: 0, l: 0, r: 0 }, paper_bgcolor: "rgba(0,0,0,0)" }}
-                                                config={{ displayModeBar: false }}
-                                            />
-                                        </Suspense>
-                                    </ErrorBoundary>
+                        {/* LEFT: SENTIMENT */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px' }}>
+                            <div style={{ textAlign: 'center' }}>
+                                <div style={{ fontSize: '10px', color: '#888', textTransform: 'uppercase', letterSpacing: '1px' }}>SMART PULSE (VN30)</div>
+                                <h3 style={{ margin: '5px 0', fontSize: '1.8em', color: sentiment.market_color }}>{sentiment.market_status}</h3>
+                                <div style={{ fontSize: '2em', fontWeight: 'bold', color: sentiment.market_color }}>
+                                    {sentiment.market_score}
+                                    {/* DELTA DISPLAY */}
+                                    {sentiment.delta !== undefined && (
+                                        <span style={{ fontSize: '0.5em', marginLeft: '10px', color: sentiment.delta > 0 ? '#00e676' : (sentiment.delta < 0 ? '#ff1744' : '#888') }}>
+                                            {sentiment.delta > 0 ? "↗️" : (sentiment.delta < 0 ? "↘️" : "➖")}
+                                            {sentiment.delta > 0 ? "+" : ""}{sentiment.delta}
+                                        </span>
+                                    )}
                                 </div>
                             </div>
 
-                            {/* RIGHT: TOP LEADERS */}
-                            <div style={{ borderLeft: isMobile ? 'none' : '1px solid #444', borderTop: isMobile ? '1px solid #444' : 'none', paddingLeft: isMobile ? 0 : '20px', paddingTop: isMobile ? '15px' : 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                                <div style={{ fontSize: '10px', color: '#ff9800', marginBottom: '10px' }}>🔥 TOP LEADERS (SECTOR FLOW)</div>
-                                <div style={{ display: 'flex', gap: '10px' }}>
-                                    {leaders.length > 0 ? leaders.map((l, i) => (
-                                        <span key={i} style={{
-                                            padding: '5px 10px',
-                                            backgroundColor: '#2c2c2c',
-                                            border: `1px solid ${i === 0 ? '#ff9800' : '#444'}`,
-                                            borderRadius: '4px',
-                                            fontSize: '0.9em',
-                                            fontWeight: 'bold',
-                                            color: i === 0 ? '#ff9800' : '#ccc'
-                                        }}>
-                                            {l.replace(".VN", "")}
-                                        </span>
-                                    )) : <span style={{ color: '#666' }}>Scanning Market...</span>}
-                                </div>
+                            {/* Mini Gauge Chart */}
+                            <div style={{ width: '120px', height: '60px' }}>
+                                <ErrorBoundary>
+                                    <Suspense fallback={<div>...</div>}>
+                                        <Plot
+                                            data={[{
+                                                type: "indicator",
+                                                mode: "gauge",
+                                                value: sentiment.market_score, // Now 0..1
+                                                gauge: {
+                                                    axis: { range: [0, 1], visible: false },
+                                                    bar: { color: sentiment.market_color }, // Dynamic color from backend
+                                                    bgcolor: "#333",
+                                                    borderwidth: 0,
+                                                    steps: [
+                                                        { range: [0, 0.3], color: "rgba(239, 83, 80, 0.3)" }, // RED Zone (Fear)
+                                                        { range: [0.3, 0.7], color: "rgba(117, 117, 117, 0.3)" }, // GREY Zone (Neutral)
+                                                        { range: [0.7, 1], color: "rgba(102, 187, 106, 0.3)" } // GREEN Zone (Greed)
+                                                    ]
+                                                }
+                                            }]}
+                                            layout={{ width: 120, height: 60, margin: { t: 0, b: 0, l: 0, r: 0 }, paper_bgcolor: "rgba(0,0,0,0)" }}
+                                            config={{ displayModeBar: false }}
+                                        />
+                                    </Suspense>
+                                </ErrorBoundary>
                             </div>
                         </div>
-                    )}
+
+                        {/* RIGHT: TOP LEADERS */}
+                        <div style={{ borderLeft: isMobile ? 'none' : '1px solid #444', borderTop: isMobile ? '1px solid #444' : 'none', paddingLeft: isMobile ? 0 : '20px', paddingTop: isMobile ? '15px' : 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                            <div style={{ fontSize: '10px', color: '#ff9800', marginBottom: '10px' }}>🔥 TOP LEADERS (SECTOR FLOW)</div>
+                            <div style={{ display: 'flex', gap: '10px' }}>
+                                {leaders.length > 0 ? leaders.map((l, i) => (
+                                    <span key={i} style={{
+                                        padding: isMobile ? '8px 12px' : '5px 10px',
+                                        backgroundColor: '#2c2c2c',
+                                        border: `1px solid ${i === 0 ? '#ff9800' : '#444'}`,
+                                        borderRadius: '4px',
+                                        fontSize: isMobile ? '1.1em' : '0.9em',
+                                        fontWeight: 'bold',
+                                        color: i === 0 ? '#ff9800' : '#ccc'
+                                    }}>
+                                        {l.replace(".VN", "")}
+                                    </span>
+                                )) : <span style={{ color: '#666' }}>Scanning Market...</span>}
+                            </div>
+                        </div>
+                    </div>
+
 
                     {/* RRG CHART MAIN */}
                     <div style={{
