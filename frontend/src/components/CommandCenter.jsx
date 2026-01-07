@@ -780,7 +780,7 @@ const CommandCenter = () => {
                                     const tickerSimple = fundTicker.replace(".VN", "").toUpperCase();
                                     const rrgItem = rrgData.find(item => item.ticker === tickerSimple);
                                     // Extract simple status e.g. "LEADING" from "Leading (Dẫn dắt) 🟢"
-                                    const rrgStatus = rrgItem ? rrgItem.quadrant.split('(')[0].trim().toUpperCase() : "N/A";
+                                    const rrgStatus = rrgItem ? (rrgItem.group || "N/A").split('(')[0].trim().toUpperCase() : "N/A";
                                     const marketStatus = sentiment ? sentiment.market_status : "N/A";
 
                                     const prompt = `Phân tích Quant mã ${tickerSimple}: RRG ${rrgStatus}, P/E ${fundData.pe}, ROE ${fundData.roe}%, Market Pulse ${marketStatus}.`;
