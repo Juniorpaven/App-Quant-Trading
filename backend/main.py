@@ -483,19 +483,25 @@ def get_ohlcv_smart(ticker, period="1y"):
     print(f"Chart: Fetching {yf_ticker} via Yahoo...")
     try:
         df = yf.download(yf_ticker, period=period, progress=False, auto_adjust=True)
-        # Handle MultiIndex
-        if isinstance(df.columns, pd.MultiIndex):
-             # Try to get the ticker level if it exists
-            if yf_ticker in df.columns.get_level_values(1):
-                 df = df.xs(yf_ticker, level=1, axis=1)
-            elif yf_ticker.replace('.VN', '') in df.columns.get_level_values(1):
-                 df = df.xs(yf_ticker.replace('.VN', ''), level=1, axis=1)
         
-        # Check basic columns
+        # --- ROBUST MULTI-INDEX HANDLING ---
+        if isinstance(df.columns, pd.MultiIndex):
+            # Case 1: Columns are (Price, Ticker) -> We want just Price
+            # If extracting for single ticker, we can just drop level 1
+            try:
+                df.columns = df.columns.get_level_values(0)
+            except:
+                pass
+        
+        # --- CHECK & VALIDATE ---
         required = ['Open', 'High', 'Low', 'Close', 'Volume']
-        if not df.empty and all(col in df.columns for col in required):
-            print("Chart: Yahoo Success.")
+        missing = [c for c in required if c not in df.columns]
+        
+        if not df.empty and not missing:
+            print(f"Chart: Yahoo Success ({len(df)} bars)")
             return df[required]
+        else:
+             print(f"Chart: Yahoo Data Missing Columns: {missing}")
     except Exception as e:
         print(f"Chart: Yahoo failed: {e}")
 
