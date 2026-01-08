@@ -688,9 +688,10 @@ const CommandCenter = () => {
                                         ]}
                                         layout={{
                                             autosize: true,
+                                            dragmode: "pan", // Default to PAN (Move)
                                             margin: { t: 50, r: 20, l: 40, b: 40 },
-                                            xaxis: { title: 'RS-Ratio (Trend)', zeroline: false, gridcolor: '#333', range: [90, 110] }, // Fixed range or auto
-                                            yaxis: { title: 'RS-Momentum (Speed)', zeroline: false, gridcolor: '#333', range: [90, 110] },
+                                            xaxis: { title: 'RS-Ratio (Trend)', zeroline: false, gridcolor: '#333' }, // Auto Range
+                                            yaxis: { title: 'RS-Momentum (Speed)', zeroline: false, gridcolor: '#333' }, // Auto Range
                                             paper_bgcolor: "rgba(0,0,0,0)",
                                             plot_bgcolor: "rgba(0,0,0,0)",
                                             font: { color: "#ddd" },
@@ -707,7 +708,7 @@ const CommandCenter = () => {
                                         }}
                                         useResizeHandler={true}
                                         style={{ width: '100%', height: '100%' }}
-                                        config={{ displayModeBar: false }}
+                                        config={{ displayModeBar: 'hover', scrollZoom: true, responsive: true }}
                                     />
                                 </Suspense>
                             </ErrorBoundary>
