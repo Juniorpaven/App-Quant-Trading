@@ -688,6 +688,7 @@ const CommandCenter = () => {
                                         ]}
                                         layout={{
                                             autosize: true,
+                                            uirevision: rrgMode, // Reset zoom only when mode changes (Online <-> Offline)
                                             dragmode: "pan", // Default to PAN (Move)
                                             margin: { t: 50, r: 20, l: 40, b: 40 },
                                             xaxis: { title: 'RS-Ratio (Trend)', zeroline: false, gridcolor: '#333' }, // Auto Range
@@ -696,8 +697,8 @@ const CommandCenter = () => {
                                             plot_bgcolor: "rgba(0,0,0,0)",
                                             font: { color: "#ddd" },
                                             shapes: [
-                                                { type: 'line', x0: 100, x1: 100, y0: 0, y1: 200, line: { color: 'white', width: 1, dash: 'dot' } },
-                                                { type: 'line', x0: 0, x1: 200, y0: 100, y1: 100, line: { color: 'white', width: 1, dash: 'dot' } }
+                                                { type: 'line', x0: 100, x1: 100, y0: -1000, y1: 1000, line: { color: 'white', width: 1, dash: 'dot' } },
+                                                { type: 'line', x0: -1000, x1: 1000, y0: 100, y1: 100, line: { color: 'white', width: 1, dash: 'dot' } }
                                             ],
                                             annotations: [
                                                 { x: 105, y: 105, text: "LEADING (Dẫn dắt) 🟢", showarrow: false, font: { color: "#00e676", size: 14 }, opacity: 0.5 },
