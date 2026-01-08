@@ -687,12 +687,31 @@ const CommandCenter = () => {
                                             }
                                         ]}
                                         layout={{
+
                                             autosize: true,
-                                            uirevision: rrgMode, // Reset zoom only when mode changes (Online <-> Offline)
-                                            dragmode: "pan", // Default to PAN (Move)
+                                            uirevision: rrgMode, // Keep zoom state unless mode changes
+                                            dragmode: "pan",
                                             margin: { t: 50, r: 20, l: 40, b: 40 },
-                                            xaxis: { title: 'RS-Ratio (Trend)', zeroline: false, gridcolor: '#333' }, // Auto Range
-                                            yaxis: { title: 'RS-Momentum (Speed)', zeroline: false, gridcolor: '#333' }, // Auto Range
+                                            xaxis: {
+                                                title: 'RS-Ratio (Trend)',
+                                                zeroline: false,
+                                                gridcolor: '#333',
+                                                // DYNAMIC RANGE: Fit tightly to data + padding
+                                                range: [
+                                                    Math.min(90, ...filteredRrgData.map(d => d.x)) - 2,
+                                                    Math.max(110, ...filteredRrgData.map(d => d.x)) + 2
+                                                ]
+                                            },
+                                            yaxis: {
+                                                title: 'RS-Momentum (Speed)',
+                                                zeroline: false,
+                                                gridcolor: '#333',
+                                                // DYNAMIC RANGE: Fit tightly to data + padding
+                                                range: [
+                                                    Math.min(90, ...filteredRrgData.map(d => d.y)) - 2,
+                                                    Math.max(110, ...filteredRrgData.map(d => d.y)) + 2
+                                                ]
+                                            },
                                             paper_bgcolor: "rgba(0,0,0,0)",
                                             plot_bgcolor: "rgba(0,0,0,0)",
                                             font: { color: "#ddd" },
