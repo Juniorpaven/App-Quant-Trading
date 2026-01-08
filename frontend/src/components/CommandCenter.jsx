@@ -716,8 +716,22 @@ const CommandCenter = () => {
                                             plot_bgcolor: "rgba(0,0,0,0)",
                                             font: { color: "#ddd" },
                                             shapes: [
-                                                { type: 'line', x0: 100, x1: 100, y0: -1000, y1: 1000, line: { color: 'white', width: 1, dash: 'dot' } },
-                                                { type: 'line', x0: -1000, x1: 1000, y0: 100, y1: 100, line: { color: 'white', width: 1, dash: 'dot' } }
+                                                // Dynamic Shapes: Only draw as far as the data goes (plus padding)
+                                                // This prevents AutoScale from checking out to empty space
+                                                {
+                                                    type: 'line',
+                                                    x0: 100, x1: 100,
+                                                    y0: Math.min(90, ...filteredRrgData.map(d => d.y)) - 5,
+                                                    y1: Math.max(110, ...filteredRrgData.map(d => d.y)) + 5,
+                                                    line: { color: 'white', width: 1, dash: 'dot' }
+                                                },
+                                                {
+                                                    type: 'line',
+                                                    x0: Math.min(90, ...filteredRrgData.map(d => d.x)) - 5,
+                                                    x1: Math.max(110, ...filteredRrgData.map(d => d.x)) + 5,
+                                                    y0: 100, y1: 100,
+                                                    line: { color: 'white', width: 1, dash: 'dot' }
+                                                }
                                             ],
                                             annotations: [
                                                 { x: 105, y: 105, text: "LEADING (Dẫn dắt) 🟢", showarrow: false, font: { color: "#00e676", size: 14 }, opacity: 0.5 },
