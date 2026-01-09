@@ -193,12 +193,34 @@ const CommandCenter = () => {
             console.warn("Pulse Server Fail. Trying Snapshot...");
             try {
                 // 2. Fallback to JSON Snapshot (GitHub Raw - Instant Update)
+                // Cache Busted with timestamp
                 const jsonRes = await fetch(`https://raw.githubusercontent.com/Juniorpaven/App-Quant-Trading/main/frontend/public/data/market_pulse.json?t=${Date.now()}`);
                 if (jsonRes.ok) {
-                    const data = await jsonRes.json();
-                    setSentiment(data);
-                    if (data.top_movers && data.top_movers.length > 0) {
-                        setLeaders(data.top_movers.map(m => m.ticker));
+                    const rawData = await jsonRes.json();
+
+                    // --- MAPPING LOGIC (Colab JSON -> Frontend State) ---
+                    // Colab returns: { score, status, vnindex, change, timestamp }
+                    // Frontend expects: { market_score, market_status, market_color, delta, top_movers }
+
+                    const score = rawData.score || 0.5;
+                    let color = '#ffea00'; // Neutral Yellow
+                    if (score >= 0.6) color = '#00e676'; // Bull Green
+                    if (score <= 0.4) color = '#ff1744'; // Bear Red
+
+                    const mappedData = {
+                        market_score: score,
+                        market_status: rawData.status || "NEUTRAL",
+                        market_color: color,
+                        delta: rawData.change || 0,
+                        check_time: rawData.timestamp,
+                        top_movers: rawData.top_movers || [] // Colab might not ensure this yet
+                    };
+
+                    setSentiment(mappedData);
+
+                    // Update Leaders if available in JSON
+                    if (mappedData.top_movers && mappedData.top_movers.length > 0) {
+                        setLeaders(mappedData.top_movers.map(m => m.ticker));
                     }
                 }
             } catch (jsonErr) {
