@@ -180,19 +180,30 @@ const CommandCenter = () => {
     };
 
     // --- LOOP 1: SMART PULSE (HIGH PRIORITY - REALTIME) ---
-    // Never falls back to CSV to ensure accuracy (MA200 check)
+    // Try Server First -> If Fail, Try JSON Snapshot -> If Fail, Keep "Starting Up..."
     const fetchSmartPulse = async () => {
         try {
-            const res = await axios.get(`${API_URL}/api/dashboard/sentiment`);
+            // 1. Try Live Server
+            const res = await axios.get(`${API_URL}/api/dashboard/sentiment`, { timeout: 5000 });
             setSentiment(res.data);
-
-            // FIX: Only update leaders if server actually returns valid movers
-            // This prevents blinking/clearing when SmartPulse runs in FastMode (returning [])
             if (res.data.top_movers && res.data.top_movers.length > 0) {
                 setLeaders(res.data.top_movers.map(m => m.ticker));
             }
         } catch (e) {
-            console.warn("Pulse Connect Error (Retrying in 5s...)");
+            console.warn("Pulse Server Fail. Trying Snapshot...");
+            try {
+                // 2. Fallback to JSON Snapshot (Cache Busted)
+                const jsonRes = await fetch(`data/market_pulse.json?t=${Date.now()}`);
+                if (jsonRes.ok) {
+                    const data = await jsonRes.json();
+                    setSentiment(data);
+                    if (data.top_movers && data.top_movers.length > 0) {
+                        setLeaders(data.top_movers.map(m => m.ticker));
+                    }
+                }
+            } catch (jsonErr) {
+                console.warn("Pulse Snapshot Missing");
+            }
         }
         // Always loop logic
         if (pulseTimer.current) clearTimeout(pulseTimer.current);
