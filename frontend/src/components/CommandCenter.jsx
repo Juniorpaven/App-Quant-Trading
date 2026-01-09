@@ -192,8 +192,8 @@ const CommandCenter = () => {
         } catch (e) {
             console.warn("Pulse Server Fail. Trying Snapshot...");
             try {
-                // 2. Fallback to JSON Snapshot (Cache Busted)
-                const jsonRes = await fetch(`data/market_pulse.json?t=${Date.now()}`);
+                // 2. Fallback to JSON Snapshot (GitHub Raw - Instant Update)
+                const jsonRes = await fetch(`https://raw.githubusercontent.com/Juniorpaven/App-Quant-Trading/main/frontend/public/data/market_pulse.json?t=${Date.now()}`);
                 if (jsonRes.ok) {
                     const data = await jsonRes.json();
                     setSentiment(data);
@@ -250,8 +250,8 @@ const CommandCenter = () => {
         // Only load CSV if we aren't already Online or if Data is empty
         if (rrgData.length === 0 || rrgMode !== 'ONLINE') {
             try {
-                // Use relative path for Vite/Vercel compatibility
-                const csvRes = await fetch('data/rrg_snapshot.csv');
+                // Use GitHub Raw for Instant Update
+                const csvRes = await fetch(`https://raw.githubusercontent.com/Juniorpaven/App-Quant-Trading/main/frontend/public/data/rrg_snapshot.csv?t=${Date.now()}`);
                 if (csvRes.ok) {
                     const text = await csvRes.text();
                     processCSVData(text);
@@ -275,7 +275,7 @@ const CommandCenter = () => {
         // 1. Load CSV immediately to show valid data + Leaders
         const loadInitialCSV = async () => {
             try {
-                const csvRes = await fetch('data/rrg_snapshot.csv');
+                const csvRes = await fetch(`https://raw.githubusercontent.com/Juniorpaven/App-Quant-Trading/main/frontend/public/data/rrg_snapshot.csv?t=${Date.now()}`);
                 if (csvRes.ok) {
                     const text = await csvRes.text();
                     processCSVData(text); // This also sets Leaders!
