@@ -1,4 +1,4 @@
-# FILE: backend/main.py (FINAL COMPATIBILITY VERSION)
+# FILE: backend/main.py (FINAL OMNI-CHANNEL VERSION)
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
@@ -17,8 +17,8 @@ app.add_middleware(
 # KHO DỮ LIỆU RAM
 ORACLE_DATA_STORE = {
     "status": "waiting",
-    "data": {}, # Chứa giá đóng cửa
-    "rrg_cache": [], # Cache RRG tính sẵn
+    "data": {}, 
+    "rrg_cache": [],
     "last_updated": None
 }
 
@@ -26,7 +26,7 @@ ORACLE_DATA_STORE = {
 def read_root():
     return {"message": "Quant Server is Awake!", "oracle": ORACLE_DATA_STORE["status"]}
 
-# --- 1. NHẬN DỮ LIỆU TỪ COLAB (Universal Receiver) ---
+# --- 1. NHẬN DỮ LIỆU TỪ COLAB ---
 @app.post("/api/upload-oracle")
 async def upload_oracle(request: Request):
     try:
@@ -38,7 +38,7 @@ async def upload_oracle(request: Request):
         ORACLE_DATA_STORE["status"] = "ready"
         ORACLE_DATA_STORE["last_updated"] = pd.Timestamp.now().isoformat()
         
-        # Tự động tính RRG sơ bộ để lưu Cache (Phục vụ API RRG)
+        # Tự động tính RRG sơ bộ lưu Cache
         calculate_rrg_internal(clean_data)
         
         print(f"✅ ORACLE UPDATED: {len(clean_data)} tickers")
@@ -47,50 +47,10 @@ async def upload_oracle(request: Request):
         print(f"❌ ERROR: {e}")
         return {"status": "error", "detail": str(e)}
 
-# --- HÀM TÍNH RRG NỘI BỘ (Để phục vụ API cũ) ---
-def calculate_rrg_internal(data):
-    try:
-        rrg_list = []
-        # Tìm Benchmark
-        bench_key = "VNINDEX.VN" if "VNINDEX.VN" in data else "^VNINDEX"
-        if bench_key not in data: return
-        
-        bench_prices = pd.Series(data[bench_key])
-        
-        for ticker, prices in data.items():
-            if ticker == bench_key or len(prices) < 20: continue
-            
-            # Tính toán RS Ratio & Momentum đơn giản
-            p_series = pd.Series(prices)
-            rs = 100 * (p_series / bench_prices)
-            rs_ratio = (rs / rs.rolling(10).mean()) * 100
-            rs_mom = (rs_ratio / rs_ratio.shift(1)) * 100
-            
-            if not np.isnan(rs_ratio.iloc[-1]):
-                rrg_list.append({
-                    "Ticker": ticker.replace(".VN", ""), # Bỏ đuôi VN cho đẹp
-                    "Group": "VN30", # Mặc định
-                    "RS_Ratio": round(rs_ratio.iloc[-1], 2),
-                    "RS_Momentum": round(rs_mom.iloc[-1], 2)
-                })
-        ORACLE_DATA_STORE["rrg_cache"] = rrg_list
-    except: pass
-
-# --- 2. CÁC API TRẢ DỮ LIỆU CHO WEB (Routing đúng tên cũ) ---
-
-# A. API MARKET PULSE (Web gọi /api/dashboard/sentiment)
-@app.get("/api/dashboard/sentiment") 
-def get_sentiment_old():
-    return calculate_pulse()
-
-@app.get("/api/market-pulse") # Cổng mới (dự phòng)
-def get_sentiment_new():
-    return calculate_pulse()
-
+# --- HÀM LOGIC NỘI BỘ ---
 def calculate_pulse():
     if ORACLE_DATA_STORE["status"] != "ready":
         return {"score": 0, "status": "WARMUP ⏳"}
-
     try:
         data = ORACLE_DATA_STORE["data"]
         uptrend = 0
@@ -103,7 +63,7 @@ def calculate_pulse():
         score = uptrend / total if total > 0 else 0.5
         state = "GREED 🐂" if score >= 0.55 else ("FEAR 🐻" if score <= 0.45 else "NEUTRAL 😐")
         
-        # Lấy VNINDEX
+        # Lấy VNINDEX (đã được Colab trá hình gửi sang)
         vn_key = "VNINDEX.VN" if "VNINDEX.VN" in data else "^VNINDEX"
         vn_price = data[vn_key][-1] if vn_key in data else 0
         vn_change = vn_price - data[vn_key][-2] if vn_key in data and len(data[vn_key]) > 1 else 0
@@ -111,13 +71,46 @@ def calculate_pulse():
         return {"score": round(score, 2), "status": state, "vnindex": round(vn_price, 2), "change": round(vn_change, 2)}
     except: return {"score": 0, "status": "ERROR"}
 
-# B. API RRG (Web gọi /api/dashboard/rrg)
-@app.get("/api/dashboard/rrg")
-def get_rrg_data():
+def calculate_rrg_internal(data):
+    try:
+        rrg_list = []
+        bench_key = "VNINDEX.VN" if "VNINDEX.VN" in data else "^VNINDEX"
+        if bench_key not in data: return
+        bench_prices = pd.Series(data[bench_key])
+        
+        for ticker, prices in data.items():
+            if ticker == bench_key or len(prices) < 20: continue
+            p_series = pd.Series(prices)
+            rs = 100 * (p_series / bench_prices)
+            rs_ratio = (rs / rs.rolling(10).mean()) * 100
+            rs_mom = (rs_ratio / rs_ratio.shift(1)) * 100
+            if not np.isnan(rs_ratio.iloc[-1]):
+                rrg_list.append({
+                    "Ticker": ticker.replace(".VN", ""),
+                    "Group": "VN30",
+                    "RS_Ratio": round(rs_ratio.iloc[-1], 2),
+                    "RS_Momentum": round(rs_mom.iloc[-1], 2)
+                })
+        ORACLE_DATA_STORE["rrg_cache"] = rrg_list
+    except: pass
+
+# --- 2. API TƯƠNG THÍCH (FIX LỖI 405) ---
+# Dùng api_route với methods=["GET", "POST"] để chấp nhận mọi kiểu gọi
+
+@app.api_route("/api/dashboard/sentiment", methods=["GET", "POST"])
+def get_sentiment_compatibility(request: Request):
+    return calculate_pulse()
+
+@app.api_route("/api/market-pulse", methods=["GET", "POST"])
+def get_pulse_compatibility(request: Request):
+    return calculate_pulse()
+
+@app.api_route("/api/dashboard/rrg", methods=["GET", "POST"])
+def get_rrg_compatibility(request: Request):
     # Trả về dữ liệu RRG tính từ RAM
     if ORACLE_DATA_STORE["rrg_cache"]:
         return ORACLE_DATA_STORE["rrg_cache"]
-    return [] # Trả về rỗng nếu chưa có, Web sẽ tự thử load CSV
+    return []
 
 if __name__ == "__main__":
     import uvicorn
