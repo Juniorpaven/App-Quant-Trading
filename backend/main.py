@@ -128,7 +128,8 @@ async def get_chart(request: Request):
         else:
             ticker = request.query_params.get("ticker", "HPG")
             
-        if hasattr(ticker, 'endswith') and not ticker.endswith(".VN"): ticker += ".VN"
+        if ticker and isinstance(ticker, str) and not ticker.endswith(".VN"):
+            ticker += ".VN"
         
         data = ORACLE_DATA_STORE["data"]
         if ticker in data:
