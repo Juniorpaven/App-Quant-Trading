@@ -68,7 +68,17 @@ def calculate_pulse():
         vn_price = data[vn_key][-1] if vn_key in data else 0
         vn_change = vn_price - data[vn_key][-2] if vn_key in data and len(data[vn_key]) > 1 else 0
 
-        return {"score": round(score, 2), "status": state, "vnindex": round(vn_price, 2), "change": round(vn_change, 2)}
+        # Return SUPERSET of keys to satisfy all frontend versions
+        return {
+            "score": round(score, 2),
+            "sentiment_score": round(score, 2), # Legacy key
+            "status": state,
+            "market_status": state, # Legacy key
+            "vnindex": round(vn_price, 2),
+            "vnindex_price": round(vn_price, 2), # Legacy key
+            "change": round(vn_change, 2),
+            "vnindex_change": round(vn_change, 2) # Legacy key
+        }
     except: return {"score": 0, "status": "ERROR"}
 
 def calculate_rrg_internal(data):
