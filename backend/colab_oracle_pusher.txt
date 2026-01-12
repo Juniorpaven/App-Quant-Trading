@@ -1,0 +1,103 @@
+# --- COPY CODE NÀY VÀO GOOGLE COLAB ĐỂ CHẠY ---
+# Đây là tool "Bơm Máu" dữ liệu cho Server Render yếu (512MB RAM)
+# Chạy 1 lần vào đầu ngày (8h sáng) để nạp dữ liệu nền tảng 1 năm.
+
+# 1. Cài đặt thư viện cần thiết
+!pip install yfinance pandas requests
+
+import yfinance as yf
+import pandas as pd
+import numpy as np
+import requests
+import json
+from datetime import datetime, timedelta
+
+# --- CẤU HÌNH ---
+# THAY ĐỔI URL NÀY THÀNH LINK SERVER CỦA BẠN (VD: https://quant-app.onrender.com)
+SERVER_URL = "https://YOUR-APP-URL.onrender.com"  
+API_ENDPOINT = f"{SERVER_URL}/api/upload-oracle"
+
+# Danh sách VN30
+VN30_LIST = ["ACB.VN", "BCM.VN", "BID.VN", "BVH.VN", "CTG.VN", "FPT.VN", "GAS.VN", "GVR.VN", "HDB.VN", "HPG.VN", "MBB.VN", "MSN.VN", "MWG.VN", "PLX.VN", "POW.VN", "SAB.VN", "SHB.VN", "SSB.VN", "SSI.VN", "STB.VN", "TCB.VN", "TPB.VN", "VCB.VN", "VHM.VN", "VIB.VN", "VIC.VN", "VJC.VN", "VNM.VN", "VPB.VN", "VRE.VN"]
+FULL_LIST = VN30_LIST + ["^VNINDEX"]
+
+def run_oracle_extraction():
+    print("⏳ Đang tải dữ liệu 1 năm từ Yahoo Finance...")
+    try:
+        # 1. Tải dữ liệu 1 năm
+        data = yf.download(FULL_LIST, period="1y", progress=False, auto_adjust=False)['Adj Close']
+        
+        # Datetime fix
+        data.index = data.index.strftime('%Y-%m-%d')
+        
+        # Xử lý nếu thiếu VNINDEX
+        if "^VNINDEX" not in data.columns:
+            print("⚠️ Thiếu VNINDEX, đang tạo chỉ số giả lập...")
+            valid = [c for c in data.columns if c in VN30_LIST]
+            data["^VNINDEX"] = data[valid].mean(axis=1)
+            
+        data = data.ffill().dropna()
+        print(f"✅ Đã tải: {data.shape[0]} dòng x {data.shape[1]} cột")
+        
+        # 2. Tính toán các chỉ số "Nền tảng" (Oracle Base)
+        
+        # A. MA200 (Dùng để xác định Xu hướng dài hạn)
+        ma200 = data.rolling(window=200).mean().iloc[-1].to_dict()
+        
+        # B. Price T-20 (Giá 20 ngày trước - Dùng để tính Momentum)
+        if len(data) > 20:
+            price_t20 = data.iloc[-20].to_dict()
+        else:
+            price_t20 = data.iloc[0].to_dict()
+            
+        # C. Market Momentum History (Dùng để xếp hạng Percentile)
+        # Tính Return trung bình của rổ VN30
+        basket_cols = [c for c in data.columns if c != "^VNINDEX"]
+        basket_ret = data[basket_cols].pct_change().mean(axis=1)
+        mom_curve = basket_ret.rolling(window=20).mean() * 20
+        # Lấy 250 ngày gần nhất
+        mom_history = mom_curve.dropna().tail(252).values.tolist()
+        
+        # D. Market Breadth T-1 (Độ rộng thị trường hôm qua)
+        # Số mã > MA10
+        bench = data["^VNINDEX"]
+        beats = 0
+        total = 0
+        for t in VN30_LIST:
+            if t in data.columns:
+                rs = 100 * (data[t] / bench) # Relative Strength
+                rs_ma = rs.rolling(10).mean()
+                if rs_ma.iloc[-1] > 100: beats += 1
+                total += 1
+        breadth_t1 = beats / total if total > 0 else 0.5
+        
+        # E. Recent Prices (30-40 ngày gần nhất)
+        # Để Server vẽ biểu đồ RRG Trail và tính toán ngắn hạn
+        recent_df = data.tail(40)
+        recent_json = recent_df.to_json(date_format='iso') # Serialize DataFrame
+        
+        # 3. Đóng gói Payload
+        payload = {
+            "ma200_map": ma200,
+            "price_t20_map": price_t20,
+            "mom_history_array": mom_history,
+            "breadth_t1": breadth_t1,
+            "recent_prices_json": recent_json
+        }
+        
+        print("🚀 Đang bắn dữ liệu lên Server Render...")
+        headers = {'Content-Type': 'application/json'}
+        response = requests.post(API_ENDPOINT, data=json.dumps(payload), headers=headers)
+        
+        if response.status_code == 200:
+            print("✅ THÀNH CÔNG! Server đã nhận Oracle.")
+            print("Server phản hồi:", response.json())
+        else:
+            print(f"❌ THẤT BẠI: {response.status_code}")
+            print(response.text)
+            
+    except Exception as e:
+        print(f"❌ LỖI NGHIÊM TRỌNG: {str(e)}")
+
+# CHẠY
+run_oracle_extraction()

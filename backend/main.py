@@ -7,6 +7,8 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from scipy import stats # For Percentile Rank
+import psutil
+import gc
 
 # Removed top-level vnstock import to prevent startup timeout
 # vnstock will be imported lazily in get_vnstock_fundamentals
@@ -614,6 +616,11 @@ def get_data(tickers, period="5y"):
     return get_data_vnstock_sequential(yf_tickers, period).ffill().dropna()
 
 
+def calculate_rrg_data_legacy(tickers, benchmark="^VNINDEX"): # Legacy Slow Path
+    # This was the old huge function, keeping it just in case or we can fully remove it.
+    # For now, it's effectively dead code since get_dashboard_rrg calls the new logic above.
+    pass
+
 def calculate_rrg_data(tickers, benchmark="^VNINDEX"): # Sử dụng VNINDEX làm bench
     data = None
     
@@ -720,14 +727,27 @@ def calculate_rrg_data(tickers, benchmark="^VNINDEX"): # Sử dụng VNINDEX là
         elif curr_ratio < 100 and curr_mom < 100: quadrant = "Lagging (Tụt hậu) 🔴"
         else: quadrant = "Improving (Cải thiện) 🔵"
         
+        # History Trail (Last 5 days) for Comets
+        # We need the last 5 points of ratio and mom
+        # Ensure we have enough data
+        trail = []
+        if len(rs_ratio_series) >= 5 and len(rs_mom_series) >= 5:
+             # Zip last 5 values
+             r_tail = rs_ratio_series.iloc[-5:].values
+             m_tail = rs_mom_series.iloc[-5:].values
+             for i in range(len(r_tail)):
+                 trail.append({"x": round(r_tail[i], 2), "y": round(m_tail[i], 2)})
+        
         rrg_results.append({
             "ticker": t.replace(".VN", ""),
             "x": round(curr_ratio, 2), # RS-Ratio
             "y": round(curr_mom, 2),   # RS-Momentum
-            "quadrant": quadrant
+            "quadrant": quadrant,
+            "trail": trail # Add trail for comet effect
         })
         
     return rrg_results
+
 
 # --- ENDPOINTS ---
 
@@ -970,190 +990,185 @@ def backtest_endpoint(req: BacktestRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# --- GLOBAL CACHE FOR SMART PULSE (The "Static" Base) ---
-SMART_PULSE_ORACLE = {
-    "last_updated": None,      
-    "ma200_map": {},          # {ticker: ma200_value_yesterday}
-    "price_t20_map": {},      # {ticker: price_20_days_ago} 
-    "mom_history_array": [],  # List of past market momentum values for ranking
+# --- GLOBAL CACHE FOR HYBRID ORACLE (Colab Push) ---
+HYBRID_ORACLE = {
+    "status": "EMPTY",      
+    "last_updated": None, # Timestamp from Colab
+    "ma200_map": {},          
+    "price_t20_map": {},      
+    "mom_history_array": [],  
     "breadth_t1": 0.5,
-    "history_df": None,       # NEW: Store full history DataFrame for RRG Stitching
-    "status": "EMPTY"         
+    "recent_prices": None # DataFrame (Last 30-60 days)
 }
 
-def update_smart_pulse_oracle():
-    """Heavy operation: Runs ONCE per day (or on restart) to build the static base."""
-    global SMART_PULSE_ORACLE
-    print("⚡ ORACLE: Building Static Market Base (1Y History)...")
-    
+# --- SYSTEM STATS ---
+@app.get("/api/system/stats")
+def get_system_stats():
+    mem = psutil.virtual_memory()
+    return {
+        "ram_used_mb": round(mem.used / 1024 / 1024, 2),
+        "ram_total_mb": round(mem.total / 1024 / 1024, 2),
+        "ram_percent": mem.percent,
+        "oracle_status": HYBRID_ORACLE["status"],
+        "oracle_updated": str(HYBRID_ORACLE["last_updated"]) if HYBRID_ORACLE["last_updated"] else "Never"
+    }
+
+class OraclePayload(BaseModel):
+    ma200_map: Dict[str, float]
+    price_t20_map: Dict[str, float]
+    mom_history_array: list[float]
+    breadth_t1: float
+    recent_prices_json: str # JSON string of DataFrame (to avoid nested strict validation issues)
+    # Why string? Because flexible DF schema. User can use df.to_json() in Colab.
+
+@app.post("/api/upload-oracle")
+def upload_oracle(payload: OraclePayload):
+    global HYBRID_ORACLE
     try:
-        # 1. Fetch Heavy History
-        full_list = VN30_LIST + ["^VNINDEX"]
-
-        # OPTIMIZATION: Reduce to 1y to prevent Render OOM (Out of Memory)
-        data = yf.download(full_list, period="1y", progress=False, auto_adjust=False)['Adj Close']
+        print("📥 Receiving Oracle Data from Colab...")
         
-        if data.empty:
-            print("⚡ ORACLE FAIL: No Data from Yahoo.")
-            SMART_PULSE_ORACLE["status"] = "ERROR"
-            return False
-
-        if isinstance(data, pd.Series): data = data.to_frame()
+        # 1. Parse Data
+        HYBRID_ORACLE["ma200_map"] = payload.ma200_map
+        HYBRID_ORACLE["price_t20_map"] = payload.price_t20_map
+        HYBRID_ORACLE["mom_history_array"] = payload.mom_history_array
+        HYBRID_ORACLE["breadth_t1"] = payload.breadth_t1
         
-        # --- HANDLE MISSING VNINDEX (CRITICAL FIX) ---
-        # Yahoo often fails to fetch ^VNINDEX. We fallback to Synthetic VN30 Mean.
-        if "^VNINDEX" not in data.columns or data["^VNINDEX"].isna().all():
-            print("⚠️ VNINDEX missing or empty. Using Synthetic VN30 Benchmark.")
-            # Calculate mean of available VN30 columns
-            available_cols = [c for c in data.columns if c in VN30_LIST]
-            if available_cols:
-                data["^VNINDEX"] = data[available_cols].mean(axis=1)
-            else:
-                print("⚡ ORACLE FAIL: No valid stock data to build benchmark")
-                return False
-
-        data = data.ffill().dropna() 
+        # 2. Parse DataFrame (Recent Prices)
+        # We expect orientation='columns' or 'split'
+        df = pd.read_json(payload.recent_prices_json)
+        # Ensure Index is Datetime
+        df.index = pd.to_datetime(df.index)
         
-        # Restore strict check for 2y (need ~260 days for reliable MA200 + Momentum)
-        if len(data) < 260: 
-            print(f"⚡ ORACLE FAIL: Not enough history (Got {len(data)} days)")
-            return False
-
-        # --- SAVE HISTORY FOR RRG STITCHING ---
-        SMART_PULSE_ORACLE["history_df"] = data.copy()
-
-        # 2. Pre-calculate Static Metrics (Everything based on T-1)
+        HYBRID_ORACLE["recent_prices"] = df
+        HYBRID_ORACLE["last_updated"] = datetime.now()
+        HYBRID_ORACLE["status"] = "READY"
         
-        # A. MA200 Reference (from T-1)
-        # We have 2y data, so MA200 is valid.
-        ma200_series = data.rolling(window=200).mean().iloc[-1] 
-        SMART_PULSE_ORACLE["ma200_map"] = ma200_series.to_dict()
-
-        # B. Momentum Reference (Price T-20)
-        # We need Price 20 days ago from END (Index -20)
-        price_t20_series = data.iloc[-20]
-        SMART_PULSE_ORACLE["price_t20_map"] = price_t20_series.to_dict()
-
-        # C. Momentum History (For Percentile Rank)
-        basket_cols = [c for c in data.columns if c != "^VNINDEX"]
-        basket_daily_ret = data[basket_cols].pct_change(fill_method=None).mean(axis=1)
-        mom_curve = basket_daily_ret.rolling(window=20).mean() * 20 
+        # Clean RAM
+        gc.collect()
         
-        # Store last 252 points (minus closest day to avoid overlap if needed, but T-1 is fine)
-        valid_history = mom_curve.dropna().iloc[-253:-1].values 
-        SMART_PULSE_ORACLE["mom_history_array"] = valid_history
-
-        # D. Breadth Reference (T-1)
-        benchmark = data["^VNINDEX"]
-        beats = 0
-        total = 0
-        for t in VN30_LIST:
-            if t not in data.columns: continue
-            rs = 100 * (data[t] / benchmark)
-            rs_ma = rs.rolling(window=10).mean()
-            if rs_ma.iloc[-1] > 100: beats += 1 
-            total += 1
-        SMART_PULSE_ORACLE["breadth_t1"] = beats / total if total > 0 else 0
-
-        SMART_PULSE_ORACLE["last_updated"] = datetime.now()
-        SMART_PULSE_ORACLE["status"] = "READY"
-        print("✅ ORACLE: Static Base Ready.")
-        return True
-
+        print(f"✅ Oracle Updated! RAM Use: {psutil.virtual_memory().percent}%")
+        return {"status": "success", "message": "Oracle Data Updated Successfully"}
     except Exception as e:
-        print(f"⚡ ORACLE EXCEPTION: {e}")
-        SMART_PULSE_ORACLE["status"] = "ERROR"
-        return False
+        print(f"❌ Oracle Upload Error: {e}")
+        return {"status": "error", "detail": str(e)}
+
+def update_smart_pulse_oracle():
+    """DISABLED AUTO-RUN: Replaced by /api/upload-oracle"""
+    print("⚠️ Legacy Oracle Update is DISABLED to save RAM. Please upload data via Colab.")
+    return False
 
 @app.get("/api/dashboard/sentiment")
 def get_dashboard_sentiment():
     try:
-        # 1. CHECK & WARM UP ORACLE
-        is_stale = False
-        if SMART_PULSE_ORACLE["last_updated"]:
-            age = datetime.now() - SMART_PULSE_ORACLE["last_updated"]
-            if age.total_seconds() > 43200: is_stale = True # 12 hours
+        # 1. CHECK HYBRID ORACLE
+        if HYBRID_ORACLE["status"] != "READY":
+             return {
+                "market_score": 0.5, 
+                "market_status": "Waiting for Colab Data... (Run /upload-oracle)", 
+                "market_color": "#888", 
+                "delta": 0
+            }
 
-        if SMART_PULSE_ORACLE["status"] != "READY" or is_stale:
-            success = update_smart_pulse_oracle()
-            if not success:
-                # Soft Fail
-                return {
-                    "market_score": 0.5, 
-                    "market_status": "Starting Up (Warming Cache)...", 
-                    "market_color": "#888", 
-                    "delta": 0,
-                    "top_movers": []
-                }
-
-        # 2. FAST TICK (The "Dynamic" Pulse) - ONLY 1 DAY
+        # 2. FAST TICK (Dynamic) - Fetch ONLY 1 Day Live
         full_list = VN30_LIST + ["^VNINDEX"]
         try:
+            # Quick Fetch 1d
             live_data = yf.download(full_list, period="1d", progress=False, auto_adjust=False)['Adj Close']
-        except:
-             return {"market_score": 0.5, "market_status": "Live Data Lag...", "market_color": "#888", "delta": 0, "top_movers": []}
+            
+            # Handle YF quirks
+            if isinstance(live_data, pd.Series): live_data = live_data.to_frame()
+            if "^VNINDEX" not in live_data.columns and not live_data.empty:
+                 # Synthetic fallback
+                 valid = [c for c in live_data.columns if c in VN30_LIST]
+                 if valid: live_data["^VNINDEX"] = live_data[valid].mean(axis=1)
 
-        if live_data.empty:
-             # If no live data (weekend/holiday), use static Snapshot
-             # But if static is ready, better return that than nothing?
-             return {"market_score": 0.5, "market_status": "Market Closed", "market_color": "#888", "delta": 0, "top_movers": []}
+        except Exception as e:
+             print(f"Live Fetch Error: {e}")
+             live_data = pd.DataFrame() # Continue with just Oracle if live fails?
 
-        current_prices = live_data.iloc[-1] 
+        # 3. COMPUTE METRICS (Hybrid)
         
-        # 3. INCREMENTAL CALC (Merge Static + Dynamic)
+        # A. Get Latest Prices (Live > Oracle Last Day)
+        current_prices = {}
+        if not live_data.empty:
+             current_prices = live_data.iloc[-1].to_dict()
         
-        # A. BREADTH (Proxy: Use T-1 Static Base)
-        breadth_t0 = SMART_PULSE_ORACLE["breadth_t1"] 
+        # Fallback to Oracle recent price if live empty
+        if not current_prices and HYBRID_ORACLE["recent_prices"] is not None:
+             current_prices = HYBRID_ORACLE["recent_prices"].iloc[-1].to_dict()
+             
+        if not current_prices:
+             return {"market_score": 0.5, "status": "No Data"}
 
-        # B. MOMENTUM (Live Calc)
-        # Mom = Current_Price / Price_T20 (from Oracle) - 1
-        t20_map = SMART_PULSE_ORACLE["price_t20_map"]
-        
+        # B. MOMENTUM (Live Price vs Oracle T-20)
+        t20_map = HYBRID_ORACLE["price_t20_map"]
         basket_moms = []
         for t in VN30_LIST:
-            if t in current_prices and t in t20_map:
-                p_now = current_prices[t]
-                p_old = t20_map[t]
-                if p_old > 0:
-                    ret = (p_now / p_old) - 1
-                    basket_moms.append(ret)
+            # Need strict key match (handle .VN)
+            key = t 
+            if key not in current_prices: key = t.replace(".VN", "") # Try without .VN
+            
+            # Try to grab price
+            p_now = current_prices.get(t) or current_prices.get(key)
+            p_old = t20_map.get(t) or t20_map.get(key)
+            
+            if p_now and p_old and p_old > 0:
+                ret = (p_now / p_old) - 1
+                basket_moms.append(ret)
         
         curr_mom_val = sum(basket_moms) / len(basket_moms) if basket_moms else 0
 
-        # Rank T0 vs History
-        hist_moms = SMART_PULSE_ORACLE["mom_history_array"] 
+        # Rank vs History
+        hist_moms = HYBRID_ORACLE["mom_history_array"]
         mom_score_t0 = 0.5
         if len(hist_moms) > 0:
             mom_score_t0 = stats.percentileofscore(hist_moms, curr_mom_val) / 100.0
+
+        # C. BREADTH (Use T-1 from Oracle - Safe for intraday proxy or calc simple breadth)
+        # Let's use Oracle Breadth T-1 for stability, or simple live breadth
+        # Simple Live Breadth: % > MA10? (Need recent 10d history + live)
+        # We have recent_prices (30d) + live (1d). We can compute REAL Breadth!
         
-        # C. REGIME (Live Calc: Basket Price vs Oracle MA200)
-        ma200_map = SMART_PULSE_ORACLE["ma200_map"]
+        breadth_t0 = HYBRID_ORACLE["breadth_t1"] # Default fallback
+        if HYBRID_ORACLE["recent_prices"] is not None and not live_data.empty:
+            # Stitch
+            combined_recent = pd.concat([HYBRID_ORACLE["recent_prices"], live_data])
+            combined_recent = combined_recent[~combined_recent.index.duplicated(keep='last')]
+            
+            # Calc Breadth (> MA10)
+            beats = 0
+            total = 0
+            bench = combined_recent.get("^VNINDEX")
+            
+            if bench is not None:
+                for t in VN30_LIST:
+                    if t in combined_recent.columns:
+                        try:
+                            series = combined_recent[t]
+                            # RS = 100 * (Price / Bench)
+                            rs = 100 * (series / bench)
+                            rs_ma10 = rs.rolling(10).mean().iloc[-1]
+                            rs_now = rs.iloc[-1]
+                            if rs_now > rs_ma10: beats += 1
+                            total += 1
+                        except: pass
+                if total > 0: breadth_t0 = beats / total
+
+        # D. REGIME (Live Price vs Oracle MA200)
+        ma200_map = HYBRID_ORACLE["ma200_map"]
+        basket_now_vals = [v for k,v in current_prices.items() if k in VN30_LIST]
+        basket_price = sum(basket_now_vals) / len(basket_now_vals) if basket_now_vals else 0
         
-        basket_now_vals = [current_prices[t] for t in VN30_LIST if t in current_prices]
-        basket_price_now = sum(basket_now_vals) / len(basket_now_vals) if basket_now_vals else 0
-        
-        ma_vals = [ma200_map[t] for t in VN30_LIST if t in ma200_map]
-        basket_ma200_ref = sum(ma_vals) / len(ma_vals) if ma_vals else 0
+        # Avg MA200
+        ma_vals = [v for k,v in ma200_map.items() if k in VN30_LIST]
+        ref_ma200 = sum(ma_vals) / len(ma_vals) if ma_vals else 0
         
         regime_mul = 1.0
-        if basket_price_now < basket_ma200_ref: regime_mul = 0.7
-
-        # 4. FINAL SCORES
+        if basket_price < ref_ma200: regime_mul = 0.7
+        
+        # FINAL SCORE
         final_score = (0.6 * breadth_t0 + 0.4 * mom_score_t0) * regime_mul
         
-        # Delta Proxy: Compare vs Mom T-1 Score (from History Tail)
-        # We assume Breadth didn't change drastically in 1 session for Delta purposes in Fast Mode
-        last_hist_val = hist_moms[-1] if len(hist_moms) > 0 else 0
-        mom_score_t1 = stats.percentileofscore(hist_moms[:-1], last_hist_val) / 100.0 if len(hist_moms) > 1 else 0.5
-        
-        # Reconstruct T-1 Score (assuming Regime T-1 ~ Regime T-0 for delta context, or use strict history)
-        # regime T-1 check:
-        # We don't have Price T-1 easily here without fetching history again. 
-        # Assume Regime unchanged for Delta visual.
-        score_t1_approx = (0.6 * breadth_t0 + 0.4 * mom_score_t1) * regime_mul 
-        
-        delta = final_score - score_t1_approx
-
         # DISPLAY
         smart_pulse_score = round(final_score, 2)
         status = "TRUNG TÍNH (Neutral) 😐"
@@ -1169,25 +1184,85 @@ def get_dashboard_sentiment():
             "market_score": smart_pulse_score,
             "market_status": status,
             "market_color": d_color,
-            "delta": round(delta, 2),
-            "top_movers": [] # Frontend handles its own or use RRG leaders
+            "delta": 0, # Simplify delta for now
+            "top_movers": [] 
         }
     except Exception as e:
-        print(f"Sentiment Fast-Path Error: {e}")
-        return {"market_score": 0, "market_status": "Connecting...", "delta": 0, "top_movers": []}
+        print(f"Sentiment Error: {e}")
+        return {"market_score": 0, "market_status": f"Error: {str(e)}", "delta": 0}
 
 @app.post("/api/dashboard/rrg")
 def get_dashboard_rrg(req: Optional[NTFRequest] = None):
-    # If tickers provided, use them, else use VN30
+    # Only support VN30 for Hybrid RRG to save complexity
     tickers_to_use = VN30_LIST
-    if req and req.tickers:
-        tickers_to_use = [t.strip() for t in req.tickers.split(",")]
-        
+    
+    if HYBRID_ORACLE["status"] != "READY" or HYBRID_ORACLE["recent_prices"] is None:
+         return {"data": [], "error": "Oracle not ready. Please push data from Colab."}
+    
     try:
-        results = calculate_rrg_data(tickers_to_use)
-        return {"data": results}
+        # 1. Stitch Data: Recent (30d) + Live (1d)
+        recent_df = HYBRID_ORACLE["recent_prices"]
+        
+        # Fetch Live '1d' only
+        live_df = get_data(tickers_to_use + ["^VNINDEX"], period="1d")
+        
+        combined_df = recent_df # Default
+        if not live_df.empty:
+             combined_df = pd.concat([recent_df, live_df])
+             combined_df = combined_df[~combined_df.index.duplicated(keep='last')]
+        
+        # 2. Compute RRG (On ~31 days of data)
+        # Passed to calculation_rrg_logic (internal reused or inline)
+        # We reuse the logic inside calculate_rrg_data but we need to bypass 'fetch'
+        # Let's Refactor 'calculate_rrg_data' to 'calculate_rrg_from_df'
+        # For now, just inline the logic here purely for speed
+        
+        data = combined_df.ffill().dropna()
+        benchmark = "^VNINDEX"
+        if benchmark not in data.columns:
+             # Try synthetic bench if needed
+             pass 
+
+        if benchmark not in data.columns: return {"data": []}
+        
+        bench_series = data[benchmark]
+        rrg_results = []
+        
+        for t in tickers_to_use:
+            if t not in data.columns: continue
+            
+            # RS
+            rs_raw = 100 * (data[t] / bench_series)
+            
+            # RS-Ratio (MA 10)
+            rs_ratio_series = rs_raw.rolling(window=10).mean()
+            
+            # RS-Momentum (ROC 5 of Ratio)
+            rs_mom_series = rs_ratio_series.pct_change(periods=5) * 100 + 100
+            
+            if len(rs_ratio_series) < 1: continue
+            
+            curr_ratio = rs_ratio_series.iloc[-1]
+            curr_mom = rs_mom_series.iloc[-1]
+            
+            quadrant = "Improving"
+            if curr_ratio > 100 and curr_mom > 100: quadrant = "Leading"
+            elif curr_ratio > 100 and curr_mom < 100: quadrant = "Weakening"
+            elif curr_ratio < 100 and curr_mom < 100: quadrant = "Lagging"
+            
+            rrg_results.append({
+                "ticker": t.replace(".VN", ""),
+                "x": round(curr_ratio, 2),
+                "y": round(curr_mom, 2),
+                "quadrant": quadrant
+            })
+            
+        return {"data": rrg_results}
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"RRG Error: {e}")
+        return {"data": [], "error": str(e)}
+
 
 class FundamentalRequest(BaseModel):
     ticker: str
