@@ -1,5 +1,5 @@
-# FILE: backend/main.py (VERSION 7.0 - FULL RESTORE)
-from fastapi import FastAPI, HTTPException, Request
+# FILE: backend/main.py (STABILITY UPDATE - BULLETPROOF)
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import numpy as np
@@ -9,7 +9,7 @@ import pytz
 
 app = FastAPI()
 
-# Cấu hình CORS để Web không bị chặn
+# Cấu hình CORS mở rộng tối đa
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,80 +17,80 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# KHO DỮ LIỆU RAM (Lưu trữ mọi thứ Colab gửi sang)
+# KHO DỮ LIỆU RAM
 ORACLE_DATA_STORE = {
     "status": "waiting",
-    "data": {},        # Dữ liệu giá đóng cửa
-    "rrg_cache": [],   # Kết quả RRG đã tính
+    "data": {},        
+    "rrg_cache": [],   
     "last_updated": None
 }
 
 @app.get("/")
 def read_root():
-    return {"message": "Quant Server V7.0 Active", "status": ORACLE_DATA_STORE["status"]}
+    return {"message": "Quant Server Stability V7.1 Active", "status": ORACLE_DATA_STORE["status"]}
 
-# ==========================================================
-# 1. CỔNG NHẬN DỮ LIỆU TỪ COLAB (BƠM MÁU)
-# ==========================================================
+# --- HELPER: Valid Ticker Check (Chống Crash) ---
+def clean_ticker(ticker):
+    if not ticker or not isinstance(ticker, str):
+        return "HPG.VN" # Default safe
+    ticker = ticker.upper().strip()
+    if not ticker.endswith(".VN") and ticker != "^VNINDEX" and "E1VFVN30" not in ticker:
+        ticker += ".VN"
+    return ticker
+
+# --- 1. NHẬN DỮ LIỆU TỪ COLAB ---
 @app.post("/api/upload-oracle")
 async def upload_oracle(request: Request):
     try:
         payload = await request.json()
-        # Linh hoạt lấy data dù có vỏ bọc hay không
         if "data" in payload: clean_data = payload["data"]
         else: clean_data = payload
 
         ORACLE_DATA_STORE["data"] = clean_data
         ORACLE_DATA_STORE["status"] = "ready"
         
-        # Lấy giờ VN
         tz_VN = pytz.timezone('Asia/Ho_Chi_Minh')
         ORACLE_DATA_STORE["last_updated"] = datetime.now(tz_VN).strftime("%H:%M %d/%m")
         
-        # Tính ngay RRG để lưu cache
         calculate_rrg_internal(clean_data)
-        
-        print(f"✅ ORACLE RESTORED: {len(clean_data)} tickers loaded.")
         return {"status": "success", "count": len(clean_data)}
     except Exception as e:
         return {"status": "error", "detail": str(e)}
 
-# ==========================================================
-# 2. CÁC API PHỤC VỤ WEB (KHÔI PHỤC LẠI TẤT CẢ)
-# ==========================================================
+# --- 2. CÁC API PHỤC VỤ WEB ---
 
-# A. MARKET PULSE (Đồng hồ đo tâm lý)
+# A. MARKET PULSE (Đa dạng key, chống cache)
 @app.api_route("/api/dashboard/sentiment", methods=["GET", "POST"])
-def get_sentiment(request: Request): return calculate_pulse()
+def get_sentiment(response: Response): 
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return calculate_pulse()
 
 @app.api_route("/api/market-pulse", methods=["GET", "POST"])
-def get_pulse(request: Request): return calculate_pulse()
+def get_pulse(response: Response): 
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return calculate_pulse()
 
-# B. RRG CHART (Biểu đồ luân chuyển)
+# B. RRG CHART
 @app.api_route("/api/dashboard/rrg", methods=["GET", "POST"])
-def get_rrg(request: Request):
+def get_rrg(response: Response):
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     if ORACLE_DATA_STORE["rrg_cache"]:
         return ORACLE_DATA_STORE["rrg_cache"]
     return []
 
-# C. FUNDAMENTAL SNAPSHOT (Khôi phục & dùng dữ liệu RAM)
+# C. FUNDAMENTAL SNAPSHOT (Fix Crash)
 @app.api_route("/api/dashboard/fundamentals", methods=["GET", "POST"])
 async def get_fundamentals(request: Request):
     try:
-        # Lấy ticker từ Request (GET hoặc POST)
         if request.method == "POST":
             body = await request.json()
             ticker = body.get("ticker", "HPG")
         else:
             ticker = request.query_params.get("ticker", "HPG")
 
-        # Chuẩn hóa tên (thêm .VN nếu thiếu)
-        if hasattr(ticker, 'endswith') and not ticker.endswith(".VN") and ticker != "^VNINDEX" and "E1VFVN30" not in ticker:
-            ticker += ".VN"
-
+        ticker = clean_ticker(ticker)
         data = ORACLE_DATA_STORE["data"]
         
-        # Nếu không có dữ liệu -> Trả về N/A
         if ticker not in data:
             return {
                 "ticker": ticker, "current_price": 0, "change": 0, "pct_change": 0,
@@ -111,14 +111,12 @@ async def get_fundamentals(request: Request):
             "current_price": curr,
             "change": round(change, 2),
             "pct_change": round(pct, 2),
-            "pe": "Updating...", # Colab chưa gửi P/E, để tạm placeholder
-            "roe": "Updating...",
-            "signal": "Neutral"
+            "pe": "Updating...", "roe": "Updating...", "signal": "Neutral"
         }
     except Exception as e:
         return {"status": "error", "detail": str(e)}
 
-# D. CHART API (Vẽ biểu đồ nhỏ)
+# D. CHART API (Fix Crash)
 @app.api_route("/api/dashboard/chart", methods=["GET", "POST"])
 async def get_chart(request: Request):
     try:
@@ -128,12 +126,10 @@ async def get_chart(request: Request):
         else:
             ticker = request.query_params.get("ticker", "HPG")
             
-        if ticker and isinstance(ticker, str) and not ticker.endswith(".VN"):
-            ticker += ".VN"
-        
+        ticker = clean_ticker(ticker)
         data = ORACLE_DATA_STORE["data"]
+        
         if ticker in data:
-            # Trả về 30 phiên gần nhất để vẽ chart
             recent_prices = data[ticker][-30:]
             return {
                 "ticker": ticker,
@@ -143,7 +139,7 @@ async def get_chart(request: Request):
         return {"prices": [], "labels": []}
     except: return {"prices": [], "labels": []}
 
-# E. AI ORACLE (Khôi phục logic tư vấn đơn giản)
+# E. AI ORACLE (Fix Crash)
 @app.api_route("/api/ask-ai", methods=["GET", "POST"])
 async def ask_ai(request: Request):
     try:
@@ -153,13 +149,12 @@ async def ask_ai(request: Request):
         else:
             ticker = request.query_params.get("ticker", "")
 
-        if hasattr(ticker, 'endswith') and not ticker.endswith(".VN"): ticker += ".VN"
+        ticker = clean_ticker(ticker)
         data = ORACLE_DATA_STORE["data"]
 
         if ticker not in data or len(data[ticker]) < 20:
             return {"answer": f"Tôi chưa có đủ dữ liệu về mã {ticker} để tư vấn."}
 
-        # Logic AI đơn giản: So sánh giá với MA20
         prices = data[ticker]
         last_price = prices[-1]
         ma20 = sum(prices[-20:]) / 20
@@ -171,9 +166,7 @@ async def ask_ai(request: Request):
     except:
         return {"answer": "Lỗi xử lý AI."}
 
-# ==========================================================
-# 3. LOGIC TÍNH TOÁN (INTERNAL)
-# ==========================================================
+# --- INTERNAL LOGIC ---
 def calculate_pulse():
     if ORACLE_DATA_STORE["status"] != "ready":
         return {"score": 0, "status": "WARMUP ⏳", "timestamp": "Loading..."}
@@ -190,7 +183,6 @@ def calculate_pulse():
         score = uptrend / total if total > 0 else 0.5
         state = "GREED 🐂" if score >= 0.55 else ("FEAR 🐻" if score <= 0.45 else "NEUTRAL 😐")
         
-        # Tìm Benchmark
         vn_price = 0
         vn_change = 0
         for k in ["E1VFVN30.VN", "VNINDEX.VN", "^VNINDEX"]:
@@ -199,17 +191,17 @@ def calculate_pulse():
                 vn_change = vn_price - data[k][-2]
                 break
 
-        # Return SUPERSET of keys to satisfy all frontend versions
+        time_str = ORACLE_DATA_STORE["last_updated"]
+        
         return {
-            "score": round(score, 2),
-            "sentiment_score": round(score, 2), # Legacy key
-            "status": state,
-            "market_status": state, # Legacy key
-            "vnindex": round(vn_price, 2), # Giá này có thể là ~20.000 (ETF)
-            "vnindex_price": round(vn_price, 2), # Legacy key
-            "change": round(vn_change, 2),
-            "vnindex_change": round(vn_change, 2), # Legacy key
-            "timestamp": ORACLE_DATA_STORE["last_updated"]
+            "score": round(score, 2), "sentiment_score": round(score, 2),
+            "status": state, "market_status": state,
+            "vnindex": round(vn_price, 2), "vnindex_price": round(vn_price, 2),
+            "change": round(vn_change, 2), "vnindex_change": round(vn_change, 2),
+            "timestamp": time_str,
+            "last_updated": time_str,  # Dự phòng
+            "updatedAt": time_str,     # Dự phòng
+            "date": time_str           # Dự phòng
         }
     except: return {"score": 0, "status": "ERROR"}
 
@@ -221,7 +213,6 @@ def calculate_rrg_internal(data):
             if k in data: 
                 bench_prices = pd.Series(data[k])
                 break
-        
         if bench_prices is None: return
 
         for ticker, prices in data.items():
@@ -230,7 +221,6 @@ def calculate_rrg_internal(data):
             rs = 100 * (p / bench_prices)
             rs_ratio = (rs / rs.rolling(10).mean()) * 100
             rs_mom = (rs_ratio / rs_ratio.shift(1)) * 100
-            
             if not np.isnan(rs_ratio.iloc[-1]):
                 rrg_list.append({
                     "Ticker": ticker.replace(".VN", ""), "Group": "VN30",
