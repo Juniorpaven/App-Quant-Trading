@@ -121,9 +121,36 @@ const CommandCenter = () => {
         try {
             console.log("Sending Axios request...");
             const res = await axios.post(`${API_URL}/api/dashboard/chart`, { ticker });
-            console.log("Axios response:", res.data);
+
+            // Backend returns: { ticker: "HPG", prices: [10, 11...], labels: ["T1", "T2"...] }
             if (res.data.prices && res.data.prices.length > 0) {
-                setChartData(res.data);
+                const prices = res.data.prices;
+                const labels = res.data.labels;
+
+                // Construct Plotly Data Object
+                const plotData = [
+                    {
+                        x: labels,
+                        y: prices,
+                        type: 'scatter',
+                        mode: 'lines+markers',
+                        marker: { color: '#00e5ff' },
+                        line: { width: 2 },
+                        name: 'Close Price'
+                    }
+                ];
+
+                const plotLayout = {
+                    title: `Technical Chart: ${ticker}`,
+                    paper_bgcolor: 'rgba(0,0,0,0)',
+                    plot_bgcolor: 'rgba(0,0,0,0)',
+                    font: { color: '#ddd' },
+                    xaxis: { showgrid: false, color: '#888' },
+                    yaxis: { showgrid: true, gridcolor: '#333' }
+                };
+
+                setChartData({ data: plotData, layout: plotLayout });
+
             } else {
                 const msg = res.data.error || "Không có dữ liệu trả về";
                 console.error("Chart error:", msg);
