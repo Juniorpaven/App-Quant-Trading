@@ -576,130 +576,130 @@ const CommandCenter = () => {
                     Source: VCI/VNStock Engine v2
                 </div>
             </div>
-        </div>
 
-                {/* 2. SIDEBAR PANELS */ }
-    <div id="fund-snapshot-section" style={{ ...cardStyle, flex: 1, textAlign: 'left', padding: '15px', background: '#1e1e1e', border: '1px solid #333', boxShadow: '0 4px 20px rgba(0,0,0,0.5)', position: "relative" }}>
-        <button onClick={() => exportToImage('fund-snapshot-section', 'Fundamental_Snapshot')} style={{ position: 'absolute', top: '10px', right: '10px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '16px' }} title="Export Image">📸</button>
-        <h3 style={{ ...sectionTitle, marginBottom: '10px', color: '#00e5ff' }}>📊 Fundamental Snapshot</h3>
-        <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
-            <input
-                value={fundTicker}
-                onChange={(e) => setFundTicker(e.target.value)}
-                placeholder="Ticker (e.g. HPG)"
-                style={{ flex: 1, padding: "10px", borderRadius: "4px", border: "1px solid #555", backgroundColor: "#333", color: "white" }}
-            />
-            <button
-                onClick={checkFundamentals}
-                style={{ padding: "10px 20px", backgroundColor: "#00e5ff", border: "none", borderRadius: "4px", color: "black", fontWeight: "bold", cursor: "pointer" }}
-                disabled={loadingFund}
-            >
-                {loadingFund ? "..." : "CHECK"}
-            </button>
-        </div>
 
-        {fundData && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "10px", backgroundColor: "#333", borderRadius: "5px" }}>
-                    <span>P/E</span>
-                    <strong style={{ color: fundData.pe > 20 ? "#ff1744" : "#00e676" }}>{fundData.pe}x</strong>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "10px", backgroundColor: "#333", borderRadius: "5px" }}>
-                    <span>ROE</span>
-                    <strong style={{ color: fundData.roe < 10 ? "#ff1744" : "#00e676" }}>{fundData.roe}%</strong>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "10px", backgroundColor: "#333", borderRadius: "5px" }}>
-                    <span>EPS</span>
-                    <strong>{fundData.eps} VND</strong>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "10px", backgroundColor: "#333", borderRadius: "5px" }}>
-                    <span>P/B</span>
-                    <strong>{fundData.pb}x</strong>
+            {/* 2. SIDEBAR PANELS */}
+            <div id="fund-snapshot-section" style={{ ...cardStyle, flex: 1, textAlign: 'left', padding: '15px', background: '#1e1e1e', border: '1px solid #333', boxShadow: '0 4px 20px rgba(0,0,0,0.5)', position: "relative" }}>
+                <button onClick={() => exportToImage('fund-snapshot-section', 'Fundamental_Snapshot')} style={{ position: 'absolute', top: '10px', right: '10px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '16px' }} title="Export Image">📸</button>
+                <h3 style={{ ...sectionTitle, marginBottom: '10px', color: '#00e5ff' }}>📊 Fundamental Snapshot</h3>
+                <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
+                    <input
+                        value={fundTicker}
+                        onChange={(e) => setFundTicker(e.target.value)}
+                        placeholder="Ticker (e.g. HPG)"
+                        style={{ flex: 1, padding: "10px", borderRadius: "4px", border: "1px solid #555", backgroundColor: "#333", color: "white" }}
+                    />
+                    <button
+                        onClick={checkFundamentals}
+                        style={{ padding: "10px 20px", backgroundColor: "#00e5ff", border: "none", borderRadius: "4px", color: "black", fontWeight: "bold", cursor: "pointer" }}
+                        disabled={loadingFund}
+                    >
+                        {loadingFund ? "..." : "CHECK"}
+                    </button>
                 </div>
 
-                {/* WARNING BOX */}
-                {(fundData.pe > 20 || fundData.roe < 10) && (
-                    <div style={{ marginTop: "10px", padding: "10px", backgroundColor: "rgba(255, 23, 68, 0.1)", border: "1px solid #ff1744", color: "#ff1744", fontSize: "13px" }}>
-                        ⚠️ Warning:
-                        {fundData.pe > 20 && " High Valuation (P/E > 20)."}
-                        {fundData.roe < 10 && " Low Efficiency (ROE < 10%)."}
+                {fundData && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", padding: "10px", backgroundColor: "#333", borderRadius: "5px" }}>
+                            <span>P/E</span>
+                            <strong style={{ color: fundData.pe > 20 ? "#ff1744" : "#00e676" }}>{fundData.pe}x</strong>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", padding: "10px", backgroundColor: "#333", borderRadius: "5px" }}>
+                            <span>ROE</span>
+                            <strong style={{ color: fundData.roe < 10 ? "#ff1744" : "#00e676" }}>{fundData.roe}%</strong>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", padding: "10px", backgroundColor: "#333", borderRadius: "5px" }}>
+                            <span>EPS</span>
+                            <strong>{fundData.eps} VND</strong>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", padding: "10px", backgroundColor: "#333", borderRadius: "5px" }}>
+                            <span>P/B</span>
+                            <strong>{fundData.pb}x</strong>
+                        </div>
+
+                        {/* WARNING BOX */}
+                        {(fundData.pe > 20 || fundData.roe < 10) && (
+                            <div style={{ marginTop: "10px", padding: "10px", backgroundColor: "rgba(255, 23, 68, 0.1)", border: "1px solid #ff1744", color: "#ff1744", fontSize: "13px" }}>
+                                ⚠️ Warning:
+                                {fundData.pe > 20 && " High Valuation (P/E > 20)."}
+                                {fundData.roe < 10 && " Low Efficiency (ROE < 10%)."}
+                            </div>
+                        )}
+                        {fundData.pe <= 20 && fundData.roe >= 10 && (
+                            <div style={{ marginTop: "10px", padding: "10px", backgroundColor: "rgba(0, 230, 118, 0.1)", border: "1px solid #00e676", color: "#00e676", fontSize: "13px", fontWeight: "bold" }}>
+                                ✅ Fundamentals Good
+                            </div>
+                        )}
+                        <div style={{ fontSize: '10px', color: '#666', marginTop: '5px' }}>Source: {fundData.source}</div>
+
+                        {/* COPY PROMPT BUTTON */}
+                        <button
+                            onClick={() => {
+                                if (!fundData) return;
+                                const tickerSimple = fundTicker.replace(".VN", "").toUpperCase();
+                                const rrgItem = rrgData.find(item => item.ticker === tickerSimple);
+                                // Extract simple status e.g. "LEADING" from "Leading (Dẫn dắt) 🟢"
+                                const rrgStatus = rrgItem ? (rrgItem.group || "N/A").split('(')[0].trim().toUpperCase() : "N/A";
+                                const marketStatus = sentiment ? sentiment.market_status : "N/A";
+
+                                const prompt = `Phân tích Quant mã ${tickerSimple}: RRG ${rrgStatus}, P/E ${fundData.pe}, ROE ${fundData.roe}%, Market Pulse ${marketStatus}.`;
+
+                                navigator.clipboard.writeText(prompt);
+                                alert("📋 Đã copy Prompt cho AI:\n" + prompt);
+                            }}
+                            style={{
+                                marginTop: "15px",
+                                padding: "8px",
+                                width: "100%",
+                                backgroundColor: "#e91e63",
+                                color: "white",
+                                border: "none",
+                                borderRadius: "4px",
+                                cursor: "pointer",
+                                fontWeight: "bold",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                gap: "5px"
+                            }}
+                        >
+                            🤖 Copy Prompt to AI
+                        </button>
                     </div>
                 )}
-                {fundData.pe <= 20 && fundData.roe >= 10 && (
-                    <div style={{ marginTop: "10px", padding: "10px", backgroundColor: "rgba(0, 230, 118, 0.1)", border: "1px solid #00e676", color: "#00e676", fontSize: "13px", fontWeight: "bold" }}>
-                        ✅ Fundamentals Good
-                    </div>
-                )}
-                <div style={{ fontSize: '10px', color: '#666', marginTop: '5px' }}>Source: {fundData.source}</div>
-
-                {/* COPY PROMPT BUTTON */}
-                <button
-                    onClick={() => {
-                        if (!fundData) return;
-                        const tickerSimple = fundTicker.replace(".VN", "").toUpperCase();
-                        const rrgItem = rrgData.find(item => item.ticker === tickerSimple);
-                        // Extract simple status e.g. "LEADING" from "Leading (Dẫn dắt) 🟢"
-                        const rrgStatus = rrgItem ? (rrgItem.group || "N/A").split('(')[0].trim().toUpperCase() : "N/A";
-                        const marketStatus = sentiment ? sentiment.market_status : "N/A";
-
-                        const prompt = `Phân tích Quant mã ${tickerSimple}: RRG ${rrgStatus}, P/E ${fundData.pe}, ROE ${fundData.roe}%, Market Pulse ${marketStatus}.`;
-
-                        navigator.clipboard.writeText(prompt);
-                        alert("📋 Đã copy Prompt cho AI:\n" + prompt);
-                    }}
-                    style={{
-                        marginTop: "15px",
-                        padding: "8px",
-                        width: "100%",
-                        backgroundColor: "#e91e63",
-                        color: "white",
-                        border: "none",
-                        borderRadius: "4px",
-                        cursor: "pointer",
-                        fontWeight: "bold",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: "5px"
-                    }}
-                >
-                    🤖 Copy Prompt to AI
-                </button>
             </div>
-        )}
-    </div>
 
 
-    {/* 3. NEW FULL WIDTH CHART SECTION */ }
-    <div id="volume-profile-section" style={{ marginTop: '20px', padding: '20px', backgroundColor: '#1e1e1e', borderRadius: '12px', border: '1px solid #333', position: "relative" }}>
-        <button onClick={() => exportToImage('volume-profile-section', 'Volume_Profile_POC')} style={{ position: 'absolute', top: '20px', right: '20px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '18px', zIndex: 10 }} title="Export Image">📸</button>
-        <h3 style={{ color: '#00e5ff', fontSize: '1.2em', marginBottom: '15px' }}>📈 SMART CHART + VOLUME PROFILE (POC)</h3>
-        <div style={{ minHeight: '500px' }}>
-            {isChartLoading ? (
-                <div style={{ color: '#888', textAlign: 'center', padding: '50px' }}>Loading Chart for {fundTicker}...</div>
-            ) : chartError ? (
-                <div style={{ color: '#ff1744', textAlign: 'center', padding: '50px' }}>
-                    ⚠️ Lỗi tải biểu đồ: {chartError}
+            {/* 3. NEW FULL WIDTH CHART SECTION */}
+            <div id="volume-profile-section" style={{ marginTop: '20px', padding: '20px', backgroundColor: '#1e1e1e', borderRadius: '12px', border: '1px solid #333', position: "relative" }}>
+                <button onClick={() => exportToImage('volume-profile-section', 'Volume_Profile_POC')} style={{ position: 'absolute', top: '20px', right: '20px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '18px', zIndex: 10 }} title="Export Image">📸</button>
+                <h3 style={{ color: '#00e5ff', fontSize: '1.2em', marginBottom: '15px' }}>📈 SMART CHART + VOLUME PROFILE (POC)</h3>
+                <div style={{ minHeight: '500px' }}>
+                    {isChartLoading ? (
+                        <div style={{ color: '#888', textAlign: 'center', padding: '50px' }}>Loading Chart for {fundTicker}...</div>
+                    ) : chartError ? (
+                        <div style={{ color: '#ff1744', textAlign: 'center', padding: '50px' }}>
+                            ⚠️ Lỗi tải biểu đồ: {chartError}
+                        </div>
+                    ) : chartData ? (
+                        <ErrorBoundary>
+                            <Suspense fallback={<div>Loading Chart...</div>}>
+                                <Plot
+                                    data={chartData.data}
+                                    layout={{ ...chartData.layout, autosize: true, height: 600, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)" }}
+                                    useResizeHandler={true}
+                                    style={{ width: '100%', height: '100%' }}
+                                />
+                            </Suspense>
+                        </ErrorBoundary>
+                    ) : (
+                        <div style={{ color: '#666', textAlign: 'center', padding: '50px' }}>
+                            Nhập mã CK vào ô 'Fundamental Snapshot' và bấm CHECK để xem biểu đồ Volume Profile.
+                        </div>
+                    )}
                 </div>
-            ) : chartData ? (
-                <ErrorBoundary>
-                    <Suspense fallback={<div>Loading Chart...</div>}>
-                        <Plot
-                            data={chartData.data}
-                            layout={{ ...chartData.layout, autosize: true, height: 600, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)" }}
-                            useResizeHandler={true}
-                            style={{ width: '100%', height: '100%' }}
-                        />
-                    </Suspense>
-                </ErrorBoundary>
-            ) : (
-                <div style={{ color: '#666', textAlign: 'center', padding: '50px' }}>
-                    Nhập mã CK vào ô 'Fundamental Snapshot' và bấm CHECK để xem biểu đồ Volume Profile.
-                </div>
-            )}
-        </div>
-    </div>
-</div >
+            </div>
+        </div >
     );
 };
 
