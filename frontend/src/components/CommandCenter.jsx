@@ -122,8 +122,8 @@ const CommandCenter = () => {
             console.log("Sending Axios request...");
             const res = await axios.post(`${API_URL}/api/dashboard/chart`, { ticker });
             console.log("Axios response:", res.data);
-            if (res.data.data) {
-                setChartData(res.data.data);
+            if (res.data.prices && res.data.prices.length > 0) {
+                setChartData(res.data);
             } else {
                 const msg = res.data.error || "Không có dữ liệu trả về";
                 console.error("Chart error:", msg);
@@ -323,7 +323,7 @@ const CommandCenter = () => {
         fetchChart(fundTicker);
         try {
             const res = await axios.post(`${API_URL}/api/dashboard/fundamentals`, { ticker: fundTicker });
-            setFundData(res.data.data);
+            setFundData(res.data);
         } catch (e) { alert("Fund Error: " + e.message); }
         setLoadingFund(false);
     };
