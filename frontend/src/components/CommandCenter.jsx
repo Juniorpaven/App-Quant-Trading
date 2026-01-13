@@ -175,104 +175,41 @@ const CommandCenter = () => {
     const retryCount = React.useRef(0);
     const [isUsingFallback, setIsUsingFallback] = useState(false); // Kept for legacy ref if any
 
-    // --- HELPER: CSV PARSER (RRG ONLY) ---
-    // Decoupled: This ONLY updates RRG map, does NOT touch Sentiment to avoid "Data Async" risk.
-    const processCSVData = (csvText) => {
-        const lines = csvText.split('\n');
-        const headers = lines[0].split(',').map(h => h.trim());
-        if (!headers.includes('RS_Ratio') || !headers.includes('RS_Momentum')) return;
 
-        const data = [];
-        for (let i = 1; i < lines.length; i++) {
-            const row = lines[i].split(',');
-            if (row.length < 4) continue;
-            const ticker = row[0].trim();
-            const group = row[1].trim();
-            const ratio = parseFloat(row[2]);
-            const mom = parseFloat(row[3]);
-            if (!isNaN(ratio) && !isNaN(mom)) {
-                data.push({ ticker, group, x: ratio, y: mom, size: 10 });
-            }
-        }
-
-        if (data.length > 0) {
-            setRrgData(data);
-            const groups = new Set(data.map(d => d.group || "Unclassified"));
-            setGroups(['ALL', ...Array.from(groups).sort()]);
-            setIsRrgLoading(false);
-
-            // Auto-Calc Leaders (Visual only - if server fails)
-            setLeaders(data.sort((a, b) => b.x - a.x).slice(0, 3).map(d => d.ticker));
-        }
-    };
 
     // --- LOOP 1: SMART PULSE (HIGH PRIORITY - REALTIME) ---
-    // Try Server First -> If Fail, Try JSON Snapshot -> If Fail, Keep "Starting Up..."
     const fetchSmartPulse = async () => {
         try {
-            // 1. Try Live Server
             const res = await axios.get(`${API_URL}/api/dashboard/sentiment`, { timeout: 5000 });
             setSentiment(res.data);
             if (res.data.top_movers && res.data.top_movers.length > 0) {
                 setLeaders(res.data.top_movers.map(m => m.ticker));
             }
         } catch (e) {
-            console.warn("Pulse Server Fail. Trying Snapshot...");
-            try {
-                // 2. Fallback to JSON Snapshot (GitHub Raw - Instant Update)
-                // Cache Busted with timestamp
-                const jsonRes = await fetch(`https://raw.githubusercontent.com/Juniorpaven/App-Quant-Trading/main/frontend/public/data/market_pulse.json?t=${Date.now()}`);
-                if (jsonRes.ok) {
-                    const rawData = await jsonRes.json();
-
-                    // --- MAPPING LOGIC (Colab JSON -> Frontend State) ---
-                    // Colab returns: { score, status, vnindex, change, timestamp }
-                    // Frontend expects: { market_score, market_status, market_color, delta, top_movers }
-
-                    const score = rawData.score || 0.5;
-                    let color = '#ffea00'; // Neutral Yellow
-                    if (score >= 0.6) color = '#00e676'; // Bull Green
-                    if (score <= 0.4) color = '#ff1744'; // Bear Red
-
-                    const mappedData = {
-                        market_score: score,
-                        market_status: rawData.status || "NEUTRAL",
-                        market_color: color,
-                        delta: rawData.change || 0,
-                        check_time: rawData.timestamp,
-                        top_movers: rawData.top_movers || [] // Colab might not ensure this yet
-                    };
-
-                    setSentiment(mappedData);
-
-                    // Update Leaders if available in JSON
-                    if (mappedData.top_movers && mappedData.top_movers.length > 0) {
-                        setLeaders(mappedData.top_movers.map(m => m.ticker));
-                    }
-                }
-            } catch (jsonErr) {
-                console.warn("Pulse Snapshot Missing");
-            }
+            console.warn("Pulse Server Fail");
         }
         // Always loop logic
         if (pulseTimer.current) clearTimeout(pulseTimer.current);
         pulseTimer.current = setTimeout(fetchSmartPulse, 30000);
     };
 
-    // --- LOOP 2: RRG CHART (HEAVY - WITH FALLBACK) ---
-    const fetchRRGWithFallback = async () => {
+    // --- LOOP 2: RRG CHART (HEAVY) ---
+    const fetchRRG = async () => {
         try {
             const res = await axios.post(`${API_URL}/api/dashboard/rrg`);
-            const rrgList = res.data.data || [];
+            const rrgList = res.data.data || []; // Note: Backend returns direct list if cached, but let's be safe
 
-            if (rrgList.length > 0) {
-                // Transform & Set Data
-                const mappedRrg = rrgList.map(item => ({
-                    ticker: item.ticker,
-                    x: item.rs_ratio,
-                    y: item.rs_momentum,
-                    group: item.group,
-                    size: item.cap_size || 10
+            // Backend actually returns list directly if cached, or empty list.
+            // Let's handle both array directly or { data: [] }
+            const listData = Array.isArray(res.data) ? res.data : (res.data.data || []);
+
+            if (listData.length > 0) {
+                const mappedRrg = listData.map(item => ({
+                    ticker: item.Ticker || item.ticker, // Handle Case Sensitivity
+                    x: item.RS_Ratio || item.rs_ratio,
+                    y: item.RS_Momentum || item.rs_momentum,
+                    group: item.Group || item.group || "VN30",
+                    size: 10
                 }));
 
                 setRrgData(mappedRrg);
@@ -280,65 +217,26 @@ const CommandCenter = () => {
                 setRrgMode('ONLINE');
                 setIsRrgLoading(false);
                 setMarketError(null);
-                rrgRetryCount.current = 0; // Reset retry
-
-                // Force update leaders from ONLINE RRG if available
-                const rrgLeaders = mappedRrg.sort((a, b) => b.x - a.x).slice(0, 3).map(d => d.ticker);
-                if (rrgLeaders.length > 0) setLeaders(rrgLeaders);
-
-                // If success, relax polling to 5 mins
-                if (rrgTimer.current) clearTimeout(rrgTimer.current);
-                rrgTimer.current = setTimeout(fetchRRGWithFallback, 300000);
-                return; // STOP HERE, DON'T RUN FALLBACK
             }
         } catch (err) {
-            console.warn(`RRG Server Fail (Attempt ${rrgRetryCount.current + 1})`);
+            console.warn(`RRG Server Fail`);
+            setIsRrgLoading(false);
         }
 
-        // --- FALLBACK LOGIC (Run if catch block hit OR rrgList empty) ---
-        // Only load CSV if we aren't already Online or if Data is empty
-        if (rrgData.length === 0 || rrgMode !== 'ONLINE') {
-            try {
-                // Use GitHub Raw for Instant Update
-                const csvRes = await fetch(`https://raw.githubusercontent.com/Juniorpaven/App-Quant-Trading/main/frontend/public/data/rrg_snapshot.csv?t=${Date.now()}`);
-                if (csvRes.ok) {
-                    const text = await csvRes.text();
-                    processCSVData(text);
-                    setRrgMode('OFFLINE');
-                    // Note: processCSVData already sets Leaders!
-                } else {
-                    setMarketError("RRG Unavailable (Server & Backup Missing)");
-                }
-            } catch (e) { console.error("Backup Data Error", e); }
-        }
-
-        // Exponential Backoff
-        const wait = Math.min(60000, 5000 * Math.pow(2, rrgRetryCount.current));
-        rrgRetryCount.current++;
         if (rrgTimer.current) clearTimeout(rrgTimer.current);
-        rrgTimer.current = setTimeout(fetchRRGWithFallback, wait);
+        rrgTimer.current = setTimeout(fetchRRG, 300000); // 5 mins
     };
 
     useEffect(() => {
-        // STRATEGY: "CSV FIRST" (Instant UX)
-        // 1. Load CSV immediately to show valid data + Leaders
-        const loadInitialCSV = async () => {
-            try {
-                const csvRes = await fetch(`https://raw.githubusercontent.com/Juniorpaven/App-Quant-Trading/main/frontend/public/data/rrg_snapshot.csv?t=${Date.now()}`);
-                if (csvRes.ok) {
-                    const text = await csvRes.text();
-                    processCSVData(text); // This also sets Leaders!
-                    setRrgMode('LOADING'); // Still mark as loading until real server confirms
-                }
-            } catch (e) { }
-        };
-        loadInitialCSV();
+        const handleResize = () => setIsMobile(window.innerWidth < 768);
+        window.addEventListener('resize', handleResize);
 
-        // 2. Then start polling Server
-        fetchSmartPulse(); // Fast
-        fetchRRGWithFallback(); // Slow but will overwrite CSV if success
+        // Start Loops
+        fetchSmartPulse();
+        fetchRRG();
 
         return () => {
+            window.removeEventListener('resize', handleResize);
             clearTimeout(pulseTimer.current);
             clearTimeout(rrgTimer.current);
         };
@@ -397,20 +295,7 @@ const CommandCenter = () => {
     const [selectedGroup, setSelectedGroup] = useState('ALL');
 
     // --- RRG SNAPSHOT UPLOAD MODE ---
-    const handleFileUpload = (event) => {
-        const file = event.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const text = e.target.result;
-            processCSVData(text); // Reuse Logic
-            setIsUsingFallback(true); // Treat manual upload as fallback mode
-            setRrgMode('OFFLINE'); // Manual is technically offline
-            setIsRrgLoading(false); // No longer loading from API
-            setMarketError(null); // Clear any market error
-        };
-        reader.readAsText(file);
-    };
+
 
     // Filter RRG Data based on selection
     const filteredRrgData = selectedGroup === 'ALL'
@@ -427,57 +312,9 @@ const CommandCenter = () => {
             {/* ERROR / FALLBACK UI ... */}
             {(marketError || isRrgLoading && rrgData.length === 0) && (
                 <div style={{ marginBottom: '20px', padding: '15px', border: '1px dashed #444', borderRadius: '12px', textAlign: 'center', backgroundColor: '#1e1e1e' }}>
-                    <p style={{ color: '#aaa', fontSize: '0.9em', marginBottom: '15px' }}>
-                        {isRrgLoading && !marketError && rrgData.length === 0 ? "⏳ Đang kết nối Server..." : "⚠️ Hệ thống đang bận. Dùng công cụ thủ công:"}
+                    <p style={{ color: '#aaa', fontSize: '0.9em', marginBottom: '0' }}>
+                        {isRrgLoading ? "⏳ Đang kết nối Server..." : "⚠️ Server chưa sẵn sàng. Vui lòng chạy Colab để nạp dữ liệu."}
                     </p>
-
-                    <div style={{ display: 'flex', gap: '15px', justifyContent: 'center', flexWrap: 'wrap' }}>
-                        {/* 1. COLAB BUTTON */}
-                        <a
-                            href="https://colab.research.google.com/"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '8px',
-                                padding: '10px 20px',
-                                backgroundColor: '#ff6f00',
-                                color: 'white',
-                                textDecoration: 'none',
-                                borderRadius: '6px',
-                                border: '1px solid #ff8f00',
-                                fontSize: '0.9em',
-                                fontWeight: 'bold',
-                                boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
-                            }}
-                        >
-                            🚀 Mở Máy Tính Colab
-                        </a>
-
-                        {/* 2. UPLOAD BUTTON */}
-                        <label style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '8px',
-                            padding: '10px 20px',
-                            backgroundColor: '#212121',
-                            border: '1px solid #444',
-                            borderRadius: '6px',
-                            cursor: 'pointer',
-                            fontSize: '0.9em',
-                            color: '#00e676',
-                            fontWeight: 'bold',
-                            boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
-                        }}>
-                            📂 Nạp File Snapshot (RRG)
-                            <input type="file" accept=".csv" onChange={handleFileUpload} style={{ display: 'none' }} />
-                        </label>
-                    </div>
-
-                    <div style={{ fontSize: '11px', color: '#666', marginTop: '10px' }}>
-                        Quy trình: Bấm nút Colab → Chạy (Ctrl+F9) → Tải file CSV về → Bấm nút Nạp ở trên.
-                    </div>
                 </div>
             )}
 
@@ -639,302 +476,230 @@ const CommandCenter = () => {
                         boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
                         minHeight: '400px'
                     }}>
-                        <div style={{ position: 'absolute', top: '15px', left: '15px', display: 'flex', gap: '10px', zIndex: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                            <span style={{ fontSize: '12px', color: '#00e5ff', display: 'flex', alignItems: 'center', fontWeight: 'bold' }}>🟦 RELATIVE ROTATION GRAPH (RRG)</span>
-
-                            {/* PERMANENT COLAB BUTTON */}
-                            <a
-                                href="https://colab.research.google.com/"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                style={{
-                                    textDecoration: 'none',
-                                    fontSize: '10px',
-                                    color: '#ff9800',
-                                    border: '1px solid #ff9800',
-                                    padding: '2px 8px',
-                                    borderRadius: '4px',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '4px',
-                                    marginLeft: '5px',
-                                    cursor: 'pointer',
-                                    backgroundColor: 'rgba(255, 152, 0, 0.1)'
-                                }}
-                                title="Mở Colab để cập nhật dữ liệu khi cần"
-                            >
-                                🚀 Colab
-                            </a>
-
-                            {/* SECTOR SELECTOR */}
-                            {groups.length > 0 && (
-                                <select
-                                    value={selectedGroup}
-                                    onChange={(e) => setSelectedGroup(e.target.value)}
-                                    style={{
-                                        backgroundColor: '#333',
-                                        color: 'white',
-                                        border: '1px solid #555',
-                                        padding: '2px 5px',
-                                        borderRadius: '4px',
-                                        fontSize: '11px',
-                                        marginLeft: '5px'
-                                    }}
-                                >
-                                    {groups.map(g => <option key={g} value={g}>{g}</option>)}
-                                </select>
-                            )}
-
-                            {/* PERMANENT UPLOAD TRIGGER */}
-                            <label style={{ cursor: 'pointer', fontSize: '10px', color: '#666', textDecoration: 'underline', marginLeft: '5px', display: 'flex', alignItems: 'center' }}>
-                                (📂 Nạp CSV)
-                                <input type="file" accept=".csv" onChange={handleFileUpload} style={{ display: 'none' }} />
-                            </label>
-                        </div>
-
-                        {/* OFFLINE WARNING BANNER */}
-                        {rrgMode === 'OFFLINE' && (
-                            <div style={{
-                                position: 'absolute',
-                                top: '50px',
-                                left: '50%',
-                                transform: 'translateX(-50%)',
-                                zIndex: 20,
-                                backgroundColor: 'rgba(255, 193, 7, 0.9)', // Amber Warning
-                                color: 'black',
-                                padding: '5px 15px',
-                                borderRadius: '4px',
-                                fontSize: '12px',
-                                fontWeight: 'bold',
-                                border: '1px solid #ffb300',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '5px',
-                                boxShadow: '0 2px 10px rgba(0,0,0,0.3)'
-                            }}>
-                                ⚠️ RRG OFFLINE MODE
-                            </div>
-                        )}
-
-                        {isRrgLoading && rrgData.length === 0 ? ( // Only show loading if no data and still loading
-                            <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666', flexDirection: 'column' }}>
-                                <div style={{ marginBottom: '10px' }}>Loading RRG Data (Fetching 1 Year History)...</div>
-                                <div style={{ fontSize: '0.8em', color: '#444' }}>If this takes too long, please use the Upload button above.</div>
-                            </div>
-                        ) : (
-                            <ErrorBoundary>
-                                <Suspense fallback={<div>Loading RRG...</div>}>
-                                    <Plot
-                                        data={[
-                                            {
-                                                x: filteredRrgData.map(d => d.x),
-                                                y: filteredRrgData.map(d => d.y),
-                                                text: filteredRrgData.map(d => d.ticker),
-                                                mode: 'text+markers',
-                                                textposition: 'top center',
-                                                marker: {
-                                                    size: 12,
-                                                    color: filteredRrgData.map(d => {
-                                                        if (d.x > 100 && d.y > 100) return '#00e676'; // Leading Green
-                                                        if (d.x < 100 && d.y > 100) return '#2979ff'; // Improving Blue
-                                                        if (d.x < 100 && d.y < 100) return '#ff1744'; // Lagging Red
-                                                        return '#ffea00'; // Weakening Yellow
-                                                    }),
-                                                    line: { width: 1, color: 'white' }
-                                                },
-                                                type: 'scatter',
-                                                hoverinfo: 'text+x+y+cluster' // cluster added for group info if formatted
-                                            }
-                                        ]}
-                                        layout={{
-
-                                            autosize: true,
-                                            uirevision: rrgMode, // Keep zoom state unless mode changes
-                                            dragmode: "pan",
-                                            margin: { t: 50, r: 20, l: 40, b: 40 },
-                                            xaxis: {
-                                                title: 'RS-Ratio (Trend)',
-                                                zeroline: false,
-                                                gridcolor: '#333',
-                                                // DYNAMIC RANGE: Fit tightly to data + padding
-                                                range: [
-                                                    Math.min(90, ...filteredRrgData.map(d => d.x)) - 2,
-                                                    Math.max(110, ...filteredRrgData.map(d => d.x)) + 2
-                                                ]
-                                            },
-                                            yaxis: {
-                                                title: 'RS-Momentum (Speed)',
-                                                zeroline: false,
-                                                gridcolor: '#333',
-                                                // DYNAMIC RANGE: Fit tightly to data + padding
-                                                range: [
-                                                    Math.min(90, ...filteredRrgData.map(d => d.y)) - 2,
-                                                    Math.max(110, ...filteredRrgData.map(d => d.y)) + 2
-                                                ]
-                                            },
-                                            paper_bgcolor: "rgba(0,0,0,0)",
-                                            plot_bgcolor: "rgba(0,0,0,0)",
-                                            font: { color: "#ddd" },
-                                            shapes: [
-                                                // Dynamic Shapes: Only draw as far as the data goes (plus padding)
-                                                // This prevents AutoScale from checking out to empty space
-                                                {
-                                                    type: 'line',
-                                                    x0: 100, x1: 100,
-                                                    y0: Math.min(90, ...filteredRrgData.map(d => d.y)) - 5,
-                                                    y1: Math.max(110, ...filteredRrgData.map(d => d.y)) + 5,
-                                                    line: { color: 'white', width: 1, dash: 'dot' }
-                                                },
-                                                {
-                                                    type: 'line',
-                                                    x0: Math.min(90, ...filteredRrgData.map(d => d.x)) - 5,
-                                                    x1: Math.max(110, ...filteredRrgData.map(d => d.x)) + 5,
-                                                    y0: 100, y1: 100,
-                                                    line: { color: 'white', width: 1, dash: 'dot' }
-                                                }
-                                            ],
-                                            annotations: [
-                                                { x: 105, y: 105, text: "LEADING (Dẫn dắt) 🟢", showarrow: false, font: { color: "#00e676", size: 14 }, opacity: 0.5 },
-                                                { x: 95, y: 105, text: "IMPROVING (Cải thiện) 🔵", showarrow: false, font: { color: "#2979ff", size: 14 }, opacity: 0.5 },
-                                                { x: 95, y: 95, text: "LAGGING (Tụt hậu) 🔴", showarrow: false, font: { color: "#ff1744", size: 14 }, opacity: 0.5 },
-                                                { x: 105, y: 95, text: "WEAKENING (Suy yếu) 🟡", showarrow: false, font: { color: "#ffea00", size: 14 }, opacity: 0.5 }
-                                            ]
-                                        }}
-                                        useResizeHandler={true}
-                                        style={{ width: '100%', height: '100%' }}
-                                        config={{ displayModeBar: 'hover', scrollZoom: true, responsive: true }}
-                                    />
-                                </Suspense>
-                            </ErrorBoundary>
-                        )}
-
-                        <div style={{ position: 'absolute', bottom: '10px', right: '10px', fontSize: '10px', color: '#666' }}>
-                            {rrgMode === 'OFFLINE' ? "Source: Offline Snapshot (CSV)" : "Source: VCI/VNStock Engine v2"}
-                        </div>
-                    </div>
-                </div>
-
-                {/* 2. SIDEBAR PANELS */}
-                <div id="fund-snapshot-section" style={{ ...cardStyle, flex: 1, textAlign: 'left', padding: '15px', background: '#1e1e1e', border: '1px solid #333', boxShadow: '0 4px 20px rgba(0,0,0,0.5)', position: "relative" }}>
-                    <button onClick={() => exportToImage('fund-snapshot-section', 'Fundamental_Snapshot')} style={{ position: 'absolute', top: '10px', right: '10px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '16px' }} title="Export Image">📸</button>
-                    <h3 style={{ ...sectionTitle, marginBottom: '10px', color: '#00e5ff' }}>📊 Fundamental Snapshot</h3>
-                    <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
-                        <input
-                            value={fundTicker}
-                            onChange={(e) => setFundTicker(e.target.value)}
-                            placeholder="Ticker (e.g. HPG)"
-                            style={{ flex: 1, padding: "10px", borderRadius: "4px", border: "1px solid #555", backgroundColor: "#333", color: "white" }}
-                        />
-                        <button
-                            onClick={checkFundamentals}
-                            style={{ padding: "10px 20px", backgroundColor: "#00e5ff", border: "none", borderRadius: "4px", color: "black", fontWeight: "bold", cursor: "pointer" }}
-                            disabled={loadingFund}
-                        >
-                            {loadingFund ? "..." : "CHECK"}
-                        </button>
+                        <span style={{ fontSize: '12px', color: '#00e5ff', display: 'flex', alignItems: 'center', fontWeight: 'bold' }}>🟦 RELATIVE ROTATION GRAPH (RRG)</span>
                     </div>
 
-                    {fundData && (
-                        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", padding: "10px", backgroundColor: "#333", borderRadius: "5px" }}>
-                                <span>P/E</span>
-                                <strong style={{ color: fundData.pe > 20 ? "#ff1744" : "#00e676" }}>{fundData.pe}x</strong>
-                            </div>
-                            <div style={{ display: "flex", justifyContent: "space-between", padding: "10px", backgroundColor: "#333", borderRadius: "5px" }}>
-                                <span>ROE</span>
-                                <strong style={{ color: fundData.roe < 10 ? "#ff1744" : "#00e676" }}>{fundData.roe}%</strong>
-                            </div>
-                            <div style={{ display: "flex", justifyContent: "space-between", padding: "10px", backgroundColor: "#333", borderRadius: "5px" }}>
-                                <span>EPS</span>
-                                <strong>{fundData.eps} VND</strong>
-                            </div>
-                            <div style={{ display: "flex", justifyContent: "space-between", padding: "10px", backgroundColor: "#333", borderRadius: "5px" }}>
-                                <span>P/B</span>
-                                <strong>{fundData.pb}x</strong>
-                            </div>
 
-                            {/* WARNING BOX */}
-                            {(fundData.pe > 20 || fundData.roe < 10) && (
-                                <div style={{ marginTop: "10px", padding: "10px", backgroundColor: "rgba(255, 23, 68, 0.1)", border: "1px solid #ff1744", color: "#ff1744", fontSize: "13px" }}>
-                                    ⚠️ Warning:
-                                    {fundData.pe > 20 && " High Valuation (P/E > 20)."}
-                                    {fundData.roe < 10 && " Low Efficiency (ROE < 10%)."}
-                                </div>
-                            )}
-                            {fundData.pe <= 20 && fundData.roe >= 10 && (
-                                <div style={{ marginTop: "10px", padding: "10px", backgroundColor: "rgba(0, 230, 118, 0.1)", border: "1px solid #00e676", color: "#00e676", fontSize: "13px", fontWeight: "bold" }}>
-                                    ✅ Fundamentals Good
-                                </div>
-                            )}
-                            <div style={{ fontSize: '10px', color: '#666', marginTop: '5px' }}>Source: {fundData.source}</div>
 
-                            {/* COPY PROMPT BUTTON */}
-                            <button
-                                onClick={() => {
-                                    if (!fundData) return;
-                                    const tickerSimple = fundTicker.replace(".VN", "").toUpperCase();
-                                    const rrgItem = rrgData.find(item => item.ticker === tickerSimple);
-                                    // Extract simple status e.g. "LEADING" from "Leading (Dẫn dắt) 🟢"
-                                    const rrgStatus = rrgItem ? (rrgItem.group || "N/A").split('(')[0].trim().toUpperCase() : "N/A";
-                                    const marketStatus = sentiment ? sentiment.market_status : "N/A";
-
-                                    const prompt = `Phân tích Quant mã ${tickerSimple}: RRG ${rrgStatus}, P/E ${fundData.pe}, ROE ${fundData.roe}%, Market Pulse ${marketStatus}.`;
-
-                                    navigator.clipboard.writeText(prompt);
-                                    alert("📋 Đã copy Prompt cho AI:\n" + prompt);
-                                }}
-                                style={{
-                                    marginTop: "15px",
-                                    padding: "8px",
-                                    width: "100%",
-                                    backgroundColor: "#e91e63",
-                                    color: "white",
-                                    border: "none",
-                                    borderRadius: "4px",
-                                    cursor: "pointer",
-                                    fontWeight: "bold",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    gap: "5px"
-                                }}
-                            >
-                                🤖 Copy Prompt to AI
-                            </button>
+                    {isRrgLoading && rrgData.length === 0 ? ( // Only show loading if no data and still loading
+                        <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666', flexDirection: 'column' }}>
+                            <div style={{ marginBottom: '10px' }}>Loading RRG Data (Fetching 1 Year History)...</div>
+                            <div style={{ fontSize: '0.8em', color: '#444' }}>If this takes too long, please use the Upload button above.</div>
                         </div>
-                    )}
-                </div>
-            </div>
-            {/* 3. NEW FULL WIDTH CHART SECTION */}
-            <div id="volume-profile-section" style={{ marginTop: '20px', padding: '20px', backgroundColor: '#1e1e1e', borderRadius: '12px', border: '1px solid #333', position: "relative" }}>
-                <button onClick={() => exportToImage('volume-profile-section', 'Volume_Profile_POC')} style={{ position: 'absolute', top: '20px', right: '20px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '18px', zIndex: 10 }} title="Export Image">📸</button>
-                <h3 style={{ color: '#00e5ff', fontSize: '1.2em', marginBottom: '15px' }}>📈 SMART CHART + VOLUME PROFILE (POC)</h3>
-                <div style={{ minHeight: '500px' }}>
-                    {isChartLoading ? (
-                        <div style={{ color: '#888', textAlign: 'center', padding: '50px' }}>Loading Chart for {fundTicker}...</div>
-                    ) : chartError ? (
-                        <div style={{ color: '#ff1744', textAlign: 'center', padding: '50px' }}>
-                            ⚠️ Lỗi tải biểu đồ: {chartError}
-                        </div>
-                    ) : chartData ? (
+                    ) : (
                         <ErrorBoundary>
-                            <Suspense fallback={<div>Loading Chart...</div>}>
+                            <Suspense fallback={<div>Loading RRG...</div>}>
                                 <Plot
-                                    data={chartData.data}
-                                    layout={{ ...chartData.layout, autosize: true, height: 600, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)" }}
+                                    data={[
+                                        {
+                                            x: filteredRrgData.map(d => d.x),
+                                            y: filteredRrgData.map(d => d.y),
+                                            text: filteredRrgData.map(d => d.ticker),
+                                            mode: 'text+markers',
+                                            textposition: 'top center',
+                                            marker: {
+                                                size: 12,
+                                                color: filteredRrgData.map(d => {
+                                                    if (d.x > 100 && d.y > 100) return '#00e676'; // Leading Green
+                                                    if (d.x < 100 && d.y > 100) return '#2979ff'; // Improving Blue
+                                                    if (d.x < 100 && d.y < 100) return '#ff1744'; // Lagging Red
+                                                    return '#ffea00'; // Weakening Yellow
+                                                }),
+                                                line: { width: 1, color: 'white' }
+                                            },
+                                            type: 'scatter',
+                                            hoverinfo: 'text+x+y+cluster' // cluster added for group info if formatted
+                                        }
+                                    ]}
+                                    layout={{
+
+                                        autosize: true,
+                                        uirevision: rrgMode, // Keep zoom state unless mode changes
+                                        dragmode: "pan",
+                                        margin: { t: 50, r: 20, l: 40, b: 40 },
+                                        xaxis: {
+                                            title: 'RS-Ratio (Trend)',
+                                            zeroline: false,
+                                            gridcolor: '#333',
+                                            // DYNAMIC RANGE: Fit tightly to data + padding
+                                            range: [
+                                                Math.min(90, ...filteredRrgData.map(d => d.x)) - 2,
+                                                Math.max(110, ...filteredRrgData.map(d => d.x)) + 2
+                                            ]
+                                        },
+                                        yaxis: {
+                                            title: 'RS-Momentum (Speed)',
+                                            zeroline: false,
+                                            gridcolor: '#333',
+                                            // DYNAMIC RANGE: Fit tightly to data + padding
+                                            range: [
+                                                Math.min(90, ...filteredRrgData.map(d => d.y)) - 2,
+                                                Math.max(110, ...filteredRrgData.map(d => d.y)) + 2
+                                            ]
+                                        },
+                                        paper_bgcolor: "rgba(0,0,0,0)",
+                                        plot_bgcolor: "rgba(0,0,0,0)",
+                                        font: { color: "#ddd" },
+                                        shapes: [
+                                            // Dynamic Shapes: Only draw as far as the data goes (plus padding)
+                                            // This prevents AutoScale from checking out to empty space
+                                            {
+                                                type: 'line',
+                                                x0: 100, x1: 100,
+                                                y0: Math.min(90, ...filteredRrgData.map(d => d.y)) - 5,
+                                                y1: Math.max(110, ...filteredRrgData.map(d => d.y)) + 5,
+                                                line: { color: 'white', width: 1, dash: 'dot' }
+                                            },
+                                            {
+                                                type: 'line',
+                                                x0: Math.min(90, ...filteredRrgData.map(d => d.x)) - 5,
+                                                x1: Math.max(110, ...filteredRrgData.map(d => d.x)) + 5,
+                                                y0: 100, y1: 100,
+                                                line: { color: 'white', width: 1, dash: 'dot' }
+                                            }
+                                        ],
+                                        annotations: [
+                                            { x: 105, y: 105, text: "LEADING (Dẫn dắt) 🟢", showarrow: false, font: { color: "#00e676", size: 14 }, opacity: 0.5 },
+                                            { x: 95, y: 105, text: "IMPROVING (Cải thiện) 🔵", showarrow: false, font: { color: "#2979ff", size: 14 }, opacity: 0.5 },
+                                            { x: 95, y: 95, text: "LAGGING (Tụt hậu) 🔴", showarrow: false, font: { color: "#ff1744", size: 14 }, opacity: 0.5 },
+                                            { x: 105, y: 95, text: "WEAKENING (Suy yếu) 🟡", showarrow: false, font: { color: "#ffea00", size: 14 }, opacity: 0.5 }
+                                        ]
+                                    }}
                                     useResizeHandler={true}
                                     style={{ width: '100%', height: '100%' }}
+                                    config={{ displayModeBar: 'hover', scrollZoom: true, responsive: true }}
                                 />
                             </Suspense>
                         </ErrorBoundary>
-                    ) : (
-                        <div style={{ color: '#666', textAlign: 'center', padding: '50px' }}>
-                            Nhập mã CK vào ô 'Fundamental Snapshot' và bấm CHECK để xem biểu đồ Volume Profile.
-                        </div>
                     )}
+
+                    Source: VCI/VNStock Engine v2
                 </div>
             </div>
-        </div >
+        </div>
+
+                {/* 2. SIDEBAR PANELS */ }
+    <div id="fund-snapshot-section" style={{ ...cardStyle, flex: 1, textAlign: 'left', padding: '15px', background: '#1e1e1e', border: '1px solid #333', boxShadow: '0 4px 20px rgba(0,0,0,0.5)', position: "relative" }}>
+        <button onClick={() => exportToImage('fund-snapshot-section', 'Fundamental_Snapshot')} style={{ position: 'absolute', top: '10px', right: '10px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '16px' }} title="Export Image">📸</button>
+        <h3 style={{ ...sectionTitle, marginBottom: '10px', color: '#00e5ff' }}>📊 Fundamental Snapshot</h3>
+        <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
+            <input
+                value={fundTicker}
+                onChange={(e) => setFundTicker(e.target.value)}
+                placeholder="Ticker (e.g. HPG)"
+                style={{ flex: 1, padding: "10px", borderRadius: "4px", border: "1px solid #555", backgroundColor: "#333", color: "white" }}
+            />
+            <button
+                onClick={checkFundamentals}
+                style={{ padding: "10px 20px", backgroundColor: "#00e5ff", border: "none", borderRadius: "4px", color: "black", fontWeight: "bold", cursor: "pointer" }}
+                disabled={loadingFund}
+            >
+                {loadingFund ? "..." : "CHECK"}
+            </button>
+        </div>
+
+        {fundData && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "10px", backgroundColor: "#333", borderRadius: "5px" }}>
+                    <span>P/E</span>
+                    <strong style={{ color: fundData.pe > 20 ? "#ff1744" : "#00e676" }}>{fundData.pe}x</strong>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "10px", backgroundColor: "#333", borderRadius: "5px" }}>
+                    <span>ROE</span>
+                    <strong style={{ color: fundData.roe < 10 ? "#ff1744" : "#00e676" }}>{fundData.roe}%</strong>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "10px", backgroundColor: "#333", borderRadius: "5px" }}>
+                    <span>EPS</span>
+                    <strong>{fundData.eps} VND</strong>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "10px", backgroundColor: "#333", borderRadius: "5px" }}>
+                    <span>P/B</span>
+                    <strong>{fundData.pb}x</strong>
+                </div>
+
+                {/* WARNING BOX */}
+                {(fundData.pe > 20 || fundData.roe < 10) && (
+                    <div style={{ marginTop: "10px", padding: "10px", backgroundColor: "rgba(255, 23, 68, 0.1)", border: "1px solid #ff1744", color: "#ff1744", fontSize: "13px" }}>
+                        ⚠️ Warning:
+                        {fundData.pe > 20 && " High Valuation (P/E > 20)."}
+                        {fundData.roe < 10 && " Low Efficiency (ROE < 10%)."}
+                    </div>
+                )}
+                {fundData.pe <= 20 && fundData.roe >= 10 && (
+                    <div style={{ marginTop: "10px", padding: "10px", backgroundColor: "rgba(0, 230, 118, 0.1)", border: "1px solid #00e676", color: "#00e676", fontSize: "13px", fontWeight: "bold" }}>
+                        ✅ Fundamentals Good
+                    </div>
+                )}
+                <div style={{ fontSize: '10px', color: '#666', marginTop: '5px' }}>Source: {fundData.source}</div>
+
+                {/* COPY PROMPT BUTTON */}
+                <button
+                    onClick={() => {
+                        if (!fundData) return;
+                        const tickerSimple = fundTicker.replace(".VN", "").toUpperCase();
+                        const rrgItem = rrgData.find(item => item.ticker === tickerSimple);
+                        // Extract simple status e.g. "LEADING" from "Leading (Dẫn dắt) 🟢"
+                        const rrgStatus = rrgItem ? (rrgItem.group || "N/A").split('(')[0].trim().toUpperCase() : "N/A";
+                        const marketStatus = sentiment ? sentiment.market_status : "N/A";
+
+                        const prompt = `Phân tích Quant mã ${tickerSimple}: RRG ${rrgStatus}, P/E ${fundData.pe}, ROE ${fundData.roe}%, Market Pulse ${marketStatus}.`;
+
+                        navigator.clipboard.writeText(prompt);
+                        alert("📋 Đã copy Prompt cho AI:\n" + prompt);
+                    }}
+                    style={{
+                        marginTop: "15px",
+                        padding: "8px",
+                        width: "100%",
+                        backgroundColor: "#e91e63",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "4px",
+                        cursor: "pointer",
+                        fontWeight: "bold",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "5px"
+                    }}
+                >
+                    🤖 Copy Prompt to AI
+                </button>
+            </div>
+        )}
+    </div>
+
+
+    {/* 3. NEW FULL WIDTH CHART SECTION */ }
+    <div id="volume-profile-section" style={{ marginTop: '20px', padding: '20px', backgroundColor: '#1e1e1e', borderRadius: '12px', border: '1px solid #333', position: "relative" }}>
+        <button onClick={() => exportToImage('volume-profile-section', 'Volume_Profile_POC')} style={{ position: 'absolute', top: '20px', right: '20px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '18px', zIndex: 10 }} title="Export Image">📸</button>
+        <h3 style={{ color: '#00e5ff', fontSize: '1.2em', marginBottom: '15px' }}>📈 SMART CHART + VOLUME PROFILE (POC)</h3>
+        <div style={{ minHeight: '500px' }}>
+            {isChartLoading ? (
+                <div style={{ color: '#888', textAlign: 'center', padding: '50px' }}>Loading Chart for {fundTicker}...</div>
+            ) : chartError ? (
+                <div style={{ color: '#ff1744', textAlign: 'center', padding: '50px' }}>
+                    ⚠️ Lỗi tải biểu đồ: {chartError}
+                </div>
+            ) : chartData ? (
+                <ErrorBoundary>
+                    <Suspense fallback={<div>Loading Chart...</div>}>
+                        <Plot
+                            data={chartData.data}
+                            layout={{ ...chartData.layout, autosize: true, height: 600, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)" }}
+                            useResizeHandler={true}
+                            style={{ width: '100%', height: '100%' }}
+                        />
+                    </Suspense>
+                </ErrorBoundary>
+            ) : (
+                <div style={{ color: '#666', textAlign: 'center', padding: '50px' }}>
+                    Nhập mã CK vào ô 'Fundamental Snapshot' và bấm CHECK để xem biểu đồ Volume Profile.
+                </div>
+            )}
+        </div>
+    </div>
+</div >
     );
 };
 

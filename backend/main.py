@@ -6,7 +6,6 @@ import numpy as np
 import json
 from datetime import datetime
 import pytz
-import yfinance as yf
 
 app = FastAPI()
 
@@ -92,28 +91,10 @@ async def get_fundamentals(request: Request):
         ticker = clean_ticker(ticker)
         data = ORACLE_DATA_STORE["data"]
         
-        if ticker not in data:
-            return {
-                "ticker": ticker, "current_price": 0, "change": 0, "pct_change": 0,
-                "pe": "N/A", "roe": "N/A", "signal": "No Data"
-            }
+        if ticker not in data or len(data[ticker]) < 2:
+             return {"ticker": ticker, "current_price": 0, "change": 0}
 
-        prices = []
-        if ticker in data and len(data[ticker]) >= 2:
-            prices = data[ticker]
-        else:
-            # Fallback Fetch
-            try:
-                df = yf.download(ticker, period="5d", interval="1d", progress=False, auto_adjust=True)
-                if not df.empty:
-                    try: p = df.xs(ticker, level=1, axis=1)['Close']
-                    except: p = df['Close']
-                    prices = p.dropna().tolist()
-            except: pass
-
-        if len(prices) < 2:
-            return {"ticker": ticker, "current_price": 0, "change": 0}
-
+        prices = data[ticker]
         curr = prices[-1]
         prev = prices[-2]
         change = curr - prev
@@ -142,27 +123,8 @@ async def get_chart(request: Request):
         ticker = clean_ticker(ticker)
         data = ORACLE_DATA_STORE["data"]
         
-        recent_prices = []
-        
-        # 1. Try RAM
         if ticker in data and len(data[ticker]) >= 30:
             recent_prices = data[ticker][-30:]
-        else:
-            # 2. Fallback: Fetch Live from Yahoo
-            try:
-                print(f"Fetching live for {ticker}...")
-                df = yf.download(ticker, period="3mo", interval="1d", progress=False, auto_adjust=True)
-                if not df.empty:
-                    # Handle MultiIndex if necessary
-                    try: prices = df.xs(ticker, level=1, axis=1)['Close']
-                    except: prices = df['Close']
-                    
-                    recent_prices = prices.dropna().tolist()[-30:]
-                    # Cache it slightly to avoid re-fetching immediately (Optional, skip for simplicity)
-            except Exception as e:
-                print(f"Live fetch fail: {e}")
-
-        if recent_prices:
             return {
                 "ticker": ticker,
                 "prices": recent_prices,
