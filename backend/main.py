@@ -1,4 +1,4 @@
-# FILE: backend/main.py (STABILITY UPDATE - BULLETPROOF)
+# FILE: backend/main.py (STABLE RESTORE POINT - FORCED REDEPLOY)
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
